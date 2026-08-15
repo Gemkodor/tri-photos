@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "tri-photos-scaffold",
+    "name": "Tri Photos",
     "slug": "tri-photos-scaffold",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,6 +10,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.gemkodor.triphotos",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -20,6 +21,9 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-image"
+    ]
   }
 }
