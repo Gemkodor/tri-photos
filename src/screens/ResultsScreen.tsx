@@ -8,7 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import type { DuplicateGroup } from '../lib/duplicateGroups';
+import { SIMILARITY_LEVELS, type DuplicateGroup } from '../lib/duplicateGroups';
 import { formatBytes } from '../lib/format';
 import { colors } from '../theme';
 
@@ -16,6 +16,8 @@ type Props = {
   groups: DuplicateGroup[];
   selected: Set<string>;
   deleting: boolean;
+  similarityThreshold: number;
+  onChangeSimilarity: (threshold: number) => void;
   onToggleSelect: (uri: string) => void;
   onDeleteSelected: () => void;
   onBack: () => void;
@@ -25,11 +27,15 @@ export default function ResultsScreen({
   groups,
   selected,
   deleting,
+  similarityThreshold,
+  onChangeSimilarity,
   onToggleSelect,
   onDeleteSelected,
   onBack,
 }: Props) {
   const selectedCount = selected.size;
+  const currentLevel =
+    SIMILARITY_LEVELS.find((l) => l.threshold === similarityThreshold) ?? SIMILARITY_LEVELS[1];
 
   return (
     <View style={styles.container}>
@@ -44,11 +50,34 @@ export default function ResultsScreen({
         </Text>
       </View>
 
+      <View style={styles.similaritySection}>
+        <Text style={styles.similarityLabel}>Niveau de ressemblance</Text>
+        <View style={styles.similarityRow}>
+          {SIMILARITY_LEVELS.map((level) => {
+            const active = level.threshold === similarityThreshold;
+            return (
+              <Pressable
+                key={level.id}
+                style={[styles.similarityChip, active && styles.similarityChipActive]}
+                onPress={() => onChangeSimilarity(level.threshold)}
+              >
+                <Text
+                  style={[styles.similarityChipText, active && styles.similarityChipTextActive]}
+                >
+                  {level.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.similarityDescription}>{currentLevel.description}</Text>
+      </View>
+
       {groups.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
-            Je n'ai pas trouvé de photos qui se ressemblent dans ce dossier. Essaie un autre
-            dossier si tu penses qu'il y a des doublons ailleurs.
+            Je n'ai pas trouvé de photos qui se ressemblent à ce niveau de ressemblance. Essaie un
+            réglage plus large ci-dessus, ou un autre dossier.
           </Text>
         </View>
       ) : (
@@ -138,6 +167,47 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: colors.text,
+  },
+  similaritySection: {
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
+  similarityLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.subtleText,
+    marginBottom: 8,
+  },
+  similarityRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  similarityChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  similarityChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  similarityChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  similarityChipTextActive: {
+    color: colors.primaryText,
+  },
+  similarityDescription: {
+    fontSize: 13,
+    color: colors.subtleText,
+    lineHeight: 18,
   },
   empty: {
     flex: 1,

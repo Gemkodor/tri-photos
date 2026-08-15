@@ -1,13 +1,43 @@
 import type { HashedPhoto } from './perceptualHash';
 
 /**
- * Below this Hamming distance (out of 64 bits), two photos are considered
- * the same shot. Tuned conservatively (tight) so that visually different
- * photos - like two shots from the same burst - don't get grouped together
- * and accidentally tempt a deletion; genuine re-compressed/resized copies
- * still land well under this threshold.
+ * Preset similarity levels, from strict duplicates to a looser "these look
+ * alike" grouping useful for a second, coarser sorting pass. Expressed as a
+ * max Hamming distance out of 64 bits: lower = only near-identical copies,
+ * higher = also groups photos that merely resemble each other.
  */
-export const DUPLICATE_DISTANCE_THRESHOLD = 8;
+export const SIMILARITY_LEVELS = [
+  {
+    id: 'identical',
+    label: 'Identiques',
+    threshold: 4,
+    description: 'Doublons stricts : la même photo, même si le fichier a changé.',
+  },
+  {
+    id: 'close',
+    label: 'Très proches',
+    threshold: 10,
+    description: 'Repère aussi les photos redimensionnées ou compressées différemment.',
+  },
+  {
+    id: 'similar',
+    label: 'Assez proches',
+    threshold: 16,
+    description: "Regroupe des photos qui se ressemblent sans être identiques - utile pour un second tri.",
+  },
+  {
+    id: 'loose',
+    label: 'Larges',
+    threshold: 24,
+    description: 'Regroupement très large : à utiliser pour dégrossir un gros tri.',
+  },
+] as const;
+
+export type SimilarityLevelId = (typeof SIMILARITY_LEVELS)[number]['id'];
+
+export const DEFAULT_SIMILARITY_THRESHOLD: number = SIMILARITY_LEVELS.find(
+  (l) => l.id === 'close'
+)!.threshold;
 
 function popcount32(n: number): number {
   n = n - ((n >> 1) & 0x55555555);
@@ -58,7 +88,7 @@ class UnionFind {
  */
 export function groupDuplicates(
   photos: HashedPhoto[],
-  threshold: number = DUPLICATE_DISTANCE_THRESHOLD
+  threshold: number = DEFAULT_SIMILARITY_THRESHOLD
 ): DuplicateGroup[] {
   const packed = photos.map((p) => packHash(p.hash));
   const uf = new UnionFind(photos.length);

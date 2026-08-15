@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, SafeAreaView, StatusBar, StyleSheet } from 'react-native';
 import HashWorker, { HashWorkerHandle } from './src/components/HashWorker';
-import { groupDuplicates, type DuplicateGroup } from './src/lib/duplicateGroups';
+import { DEFAULT_SIMILARITY_THRESHOLD, groupDuplicates } from './src/lib/duplicateGroups';
 import { pickFolder, scanFolderForImages } from './src/lib/imageFiles';
 import { hashPhoto, type HashedPhoto } from './src/lib/perceptualHash';
 import {
@@ -29,12 +29,18 @@ export default function App() {
     foundImages: 0,
     hashedCount: 0,
   });
-  const [groups, setGroups] = useState<DuplicateGroup[]>([]);
+  const [hashedPhotos, setHashedPhotos] = useState<HashedPhoto[]>([]);
+  const [similarityThreshold, setSimilarityThreshold] = useState(DEFAULT_SIMILARITY_THRESHOLD);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([]);
 
   const hashWorkerRef = useRef<HashWorkerHandle>(null);
+
+  const groups = useMemo(
+    () => groupDuplicates(hashedPhotos, similarityThreshold),
+    [hashedPhotos, similarityThreshold]
+  );
 
   useEffect(() => {
     getLastFolderUri().then(setLastFolderUriState);
@@ -73,7 +79,8 @@ export default function App() {
         setScanStatus({ phase: 'hashing', foundImages: images.length, hashedCount: i + 1 });
       }
 
-      setGroups(groupDuplicates(hashed));
+      setHashedPhotos(hashed);
+      setSimilarityThreshold(DEFAULT_SIMILARITY_THRESHOLD);
       setSelected(new Set());
       setScreen('results');
     } catch (error) {
@@ -99,6 +106,11 @@ export default function App() {
 
   function handleRescanLastFolder() {
     if (lastFolderUri) analyzeFolder(lastFolderUri);
+  }
+
+  function handleChangeSimilarity(threshold: number) {
+    setSimilarityThreshold(threshold);
+    setSelected(new Set());
   }
 
   function toggleSelect(uri: string) {
@@ -134,11 +146,7 @@ export default function App() {
                 await moveToTrash({ uri: photo.uri, name: photo.name });
               }
               const deletedUris = new Set(toDelete.map((p) => p.uri));
-              setGroups((prev) =>
-                prev
-                  .map((g) => ({ ...g, photos: g.photos.filter((p) => !deletedUris.has(p.uri)) }))
-                  .filter((g) => g.photos.length >= 2)
-              );
+              setHashedPhotos((prev) => prev.filter((p) => !deletedUris.has(p.uri)));
               setSelected(new Set());
               await refreshTrash();
             } catch (error) {
@@ -189,6 +197,8 @@ export default function App() {
           groups={groups}
           selected={selected}
           deleting={deleting}
+          similarityThreshold={similarityThreshold}
+          onChangeSimilarity={handleChangeSimilarity}
           onToggleSelect={toggleSelect}
           onDeleteSelected={handleDeleteSelected}
           onBack={() => setScreen('home')}
