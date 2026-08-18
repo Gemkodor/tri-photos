@@ -30,20 +30,32 @@ async function ensureTempDir() {
   }
 }
 
+export type HashPhotoResult = { photo: HashedPhoto | null; error: string | null };
+
+function describeError(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
 /**
  * Copies a SAF photo locally, computes its dHash via the WebView worker, and
  * cleans up the local temp copy - regardless of any photo's file being huge,
  * only a tiny 9x8 thumbnail ever crosses into JS.
+ *
+ * Returns the failure reason alongside a null photo (rather than silently
+ * swallowing it) so a total analysis failure can show *why* instead of just
+ * "0 photos" with no way to tell what actually went wrong.
  */
-export async function hashPhoto(
-  photo: ImageFile,
-  worker: HashWorkerHandle
-): Promise<HashedPhoto | null> {
+export async function hashPhoto(photo: ImageFile, worker: HashWorkerHandle): Promise<HashPhotoResult> {
   await ensureTempDir();
   const localUri = `${TEMP_DIR}${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
   try {
-    await FileSystem.copyAsync({ from: photo.uri, to: localUri });
+    try {
+      await FileSystem.copyAsync({ from: photo.uri, to: localUri });
+    } catch (e) {
+      return { photo: null, error: `copie du fichier : ${describeError(e)}` };
+    }
 
     let sizeBytes: number | null = null;
     try {
@@ -67,25 +79,40 @@ export async function hashPhoto(
     // has enough real detail left to judge sharpness - too small a source
     // and blur differences get smoothed away before they can be measured.
     // The worker itself shrinks this further for each purpose.
-    const context = ImageManipulator.manipulate(localUri);
-    const rendered = await context.resize({ width: 256, height: 256 }).renderAsync();
-    const saved = await rendered.saveAsync({ format: SaveFormat.PNG, base64: true });
-    if (!saved.base64) return null;
+    let base64: string | undefined;
+    try {
+      const context = ImageManipulator.manipulate(localUri);
+      const rendered = await context.resize({ width: 256, height: 256 }).renderAsync();
+      const saved = await rendered.saveAsync({ format: SaveFormat.PNG, base64: true });
+      base64 = saved.base64;
+    } catch (e) {
+      return { photo: null, error: `redimensionnement : ${describeError(e)}` };
+    }
+    if (!base64) return { photo: null, error: 'redimensionnement : pas de résultat' };
 
-    const { hash, sharpness, facesFound } = await worker.computeMetrics(saved.base64);
+    let metrics;
+    try {
+      metrics = await worker.computeMetrics(base64);
+    } catch (e) {
+      return { photo: null, error: `analyse visuelle : ${describeError(e)}` };
+    }
+
     return {
-      uri: photo.uri,
-      name: photo.name,
-      folderPath: photo.folderPath,
-      sizeBytes,
-      width,
-      height,
-      hash,
-      sharpness,
-      facesFound,
+      photo: {
+        uri: photo.uri,
+        name: photo.name,
+        folderPath: photo.folderPath,
+        sizeBytes,
+        width,
+        height,
+        hash: metrics.hash,
+        sharpness: metrics.sharpness,
+        facesFound: metrics.facesFound,
+      },
+      error: null,
     };
-  } catch {
-    return null;
+  } catch (e) {
+    return { photo: null, error: describeError(e) };
   } finally {
     await FileSystem.deleteAsync(localUri, { idempotent: true });
   }

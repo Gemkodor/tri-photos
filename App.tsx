@@ -106,6 +106,7 @@ export default function App() {
       await startScanningService(images.length);
 
       const hashed: HashedPhoto[] = [];
+      let firstError: string | null = null;
       for (let i = 0; i < images.length; i++) {
         setScanStatus({
           phase: 'hashing',
@@ -113,8 +114,9 @@ export default function App() {
           hashedCount: i,
           currentPhotoUri: images[i].uri,
         });
-        const result = await hashPhoto(images[i], worker);
-        if (result) hashed.push(result);
+        const { photo, error } = await hashPhoto(images[i], worker);
+        if (photo) hashed.push(photo);
+        else if (error && !firstError) firstError = error;
         setScanStatus({
           phase: 'hashing',
           foundImages: images.length,
@@ -125,6 +127,19 @@ export default function App() {
       }
 
       await stopScanningService();
+
+      // Every single photo failed to analyse - rather than silently landing
+      // on an empty, confusing results screen, show why so it isn't a
+      // guessing game (this shouldn't happen with a working folder, but
+      // it's much easier to fix a shown reason than an invisible one).
+      if (hashed.length === 0 && firstError) {
+        Alert.alert(
+          "L'analyse n'a rien donné",
+          `Aucune des ${images.length} photo${images.length > 1 ? 's' : ''} n'a pu être lue. Détail technique : ${firstError}`
+        );
+        setScreen('home');
+        return;
+      }
 
       const threshold = SORT_STEPS[forMode].defaultThreshold;
       setHashedPhotos(hashed);
