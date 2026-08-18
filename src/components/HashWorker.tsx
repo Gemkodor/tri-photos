@@ -9,6 +9,16 @@ import {
   TF_JS_SOURCE,
 } from '../assets/faceModel.generated';
 
+// Temporarily off: every way tried so far of loading face detection into
+// this WebView (CDN, embedded inline, local files) has ended the same way -
+// every single photo timing out, not just face detection, which points at
+// tf.js/blazeface itself being too much for this WebView to handle right
+// now rather than any particular loading method. Hashing and whole-image
+// sharpness don't need any of this, so turning it off gets the core
+// duplicate/blur finding working again while that gets investigated
+// separately, instead of leaving it broken for everything.
+const FACE_DETECTION_ENABLED = false;
+
 const FACE_MODEL_DIR = (FileSystem.cacheDirectory ?? '') + 'facemodel/';
 
 /**
@@ -22,6 +32,8 @@ const FACE_MODEL_DIR = (FileSystem.cacheDirectory ?? '') + 'facemodel/';
  * itself has no such limit.
  */
 async function ensureFaceModelFiles(): Promise<void> {
+  if (!FACE_DETECTION_ENABLED) return;
+
   // Written once and reused across scans/app launches (same cache directory
   // each time) - re-writing ~2MB before every single scan would be wasteful.
   const marker = await FileSystem.getInfoAsync(FACE_MODEL_DIR + 'model.json');
@@ -72,8 +84,12 @@ const ANALYZE_HTML = `
 <body style="margin:0">
 <canvas id="c" width="9" height="8" style="display:none"></canvas>
 <canvas id="b" width="220" height="220" style="display:none"></canvas>
-<script src="tf.min.js"></script>
-<script src="blazeface.min.js"></script>
+${
+  FACE_DETECTION_ENABLED
+    ? `<script src="tf.min.js"></script>
+<script src="blazeface.min.js"></script>`
+    : ''
+}
 <script>
   var hashCanvas = document.getElementById('c');
   var hashCtx = hashCanvas.getContext('2d');
@@ -83,7 +99,9 @@ const ANALYZE_HTML = `
 
   var faceModel = null;
   var faceModelFailed = false;
-  (function loadFaceModel() {
+  ${
+    FACE_DETECTION_ENABLED
+      ? `(function loadFaceModel() {
     try {
       blazeface.load({ modelUrl: 'model.json' }).then(function (model) {
         faceModel = model;
@@ -93,7 +111,9 @@ const ANALYZE_HTML = `
     } catch (e) {
       faceModelFailed = true;
     }
-  })();
+  })();`
+      : 'faceModelFailed = true;'
+  }
 
   function post(message) {
     window.ReactNativeWebView.postMessage(JSON.stringify(message));
@@ -275,6 +295,11 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
   const pending = useRef<Map<number, PendingEntry>>(new Map());
   const nextId = useRef(0);
   const queue = useRef<Array<{ id: number; base64: string }>>([]);
+  // Tracks *why* the page never responded, for when a request times out -
+  // "the WebView's page never finished loading" vs "it crashed" vs "it
+  // loaded fine but never answered" are very different problems to chase,
+  // and a bare "hash_timeout" can't tell them apart.
+  const diagnosis = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -308,7 +333,8 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
       return new Promise<PhotoMetrics>((resolve, reject) => {
         const timeout = setTimeout(() => {
           pending.current.delete(id);
-          reject(new Error('hash_timeout'));
+          const reason = diagnosis.current ?? (ready ? 'page chargée mais muette' : 'page jamais chargée');
+          reject(new Error(`hash_timeout (${reason})`));
         }, REQUEST_TIMEOUT_MS);
         pending.current.set(id, { resolve, reject, timeout });
         queue.current.push({ id, base64: base64Png });
@@ -357,6 +383,16 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
       onLoadEnd={() => {
         setReady(true);
         flushQueue();
+      }}
+      onError={(e) => {
+        diagnosis.current = `échec de chargement : ${e.nativeEvent.description}`;
+      }}
+      onHttpError={(e) => {
+        diagnosis.current = `erreur HTTP ${e.nativeEvent.statusCode}`;
+      }}
+      onRenderProcessGone={(e) => {
+        diagnosis.current = `page fermée par le téléphone (didCrash: ${e.nativeEvent.didCrash})`;
+        setReady(false);
       }}
       onMessage={handleMessage}
       javaScriptEnabled
