@@ -1,6 +1,12 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
+import {
+  BLAZEFACE_JS_SOURCE,
+  BLAZEFACE_MODEL_JSON,
+  BLAZEFACE_WEIGHTS_BASE64,
+  TF_JS_SOURCE,
+} from '../assets/faceModel.generated';
 
 // Difference-hash (dHash): the tiny image is 9x8 pixels; for each of the 8
 // rows we compare 8 adjacent pixel pairs, giving a 64-bit fingerprint that's
@@ -14,12 +20,17 @@ import { WebView, WebViewMessageEvent } from 'react-native-webview';
 //
 // Face-aware sharpness: a photo with a sharp, detailed background but an
 // out-of-focus face used to score as "sharp" overall, which is backwards for
-// photos of people. When a face can be found (via BlazeFace, loaded from a
-// CDN over the network - the only network calls this app makes, and only to
-// fetch that model, never to send any photo data anywhere), sharpness is
+// photos of people. When a face can be found (via BlazeFace), sharpness is
 // measured just in the face area instead of the whole frame. If no face is
-// found, or the model couldn't load (e.g. no internet the first time), it
-// falls back to whole-image sharpness like before.
+// found, it falls back to whole-image sharpness like before.
+//
+// tf.js, blazeface, and the blazeface model weights are all vendored into
+// the app (see ../assets/faceModel.generated.ts) rather than fetched from a
+// CDN at scan time: this used to make a real network call for every scan,
+// and on a slow connection that call could block the page from finishing
+// load at all - which blocked hashing every photo behind it, not just face
+// detection. Bundling them means face detection works with no internet
+// connection, and can never again hold up anything else.
 const ANALYZE_HTML = `
 <!DOCTYPE html>
 <html>
@@ -27,17 +38,8 @@ const ANALYZE_HTML = `
 <body style="margin:0">
 <canvas id="c" width="9" height="8" style="display:none"></canvas>
 <canvas id="b" width="220" height="220" style="display:none"></canvas>
-<!--
-  async: on a slow or absent network, a normal blocking <script src> can
-  hold up the page's load-complete event for a long time (until the request
-  finally resolves or fails), which held up every single photo's hashing
-  behind it - even hashing has nothing to do with face detection. Loading
-  these in the background instead means the page (and hashing) is ready
-  immediately; face detection just silently stays unavailable until (or
-  unless) these finish loading, same as when the CDN can't be reached at all.
--->
-<script async src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-<script async src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.0/dist/blazeface.min.js"></script>
+<script>${TF_JS_SOURCE}</script>
+<script>${BLAZEFACE_JS_SOURCE}</script>
 <script>
   var hashCanvas = document.getElementById('c');
   var hashCtx = hashCanvas.getContext('2d');
@@ -45,35 +47,39 @@ const ANALYZE_HTML = `
   var blurCtx = blurCanvas.getContext('2d');
   var BLUR_SIZE = 220;
 
+  var BLAZEFACE_MODEL_JSON = ${JSON.stringify(BLAZEFACE_MODEL_JSON)};
+  var BLAZEFACE_WEIGHTS_BASE64 = ${JSON.stringify(BLAZEFACE_WEIGHTS_BASE64)};
+
+  function base64ToArrayBuffer(base64) {
+    var binary = atob(base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
   var faceModel = null;
   var faceModelFailed = false;
-  // tf/blazeface load in the background (see the async script tags above),
-  // so they're very unlikely to be ready the instant this runs. Poll for a
-  // while instead of checking once - long enough to give a real network a
-  // fair chance, short enough to still give up cleanly on a bad one.
-  var FACE_MODEL_LOAD_TIMEOUT_MS = 8000;
+  // Loads the model straight from the bundled bytes above (tf.io.fromMemory)
+  // instead of tf.loadGraphModel(url) - no fetch, no network, ever.
   (function loadFaceModel() {
-    var start = Date.now();
-    function tryLoad() {
-      try {
-        if (typeof tf === 'undefined' || typeof blazeface === 'undefined') {
-          if (Date.now() - start > FACE_MODEL_LOAD_TIMEOUT_MS) {
-            faceModelFailed = true;
-            return;
-          }
-          setTimeout(tryLoad, 150);
-          return;
-        }
-        blazeface.load().then(function (model) {
-          faceModel = model;
-        }).catch(function () {
-          faceModelFailed = true;
-        });
-      } catch (e) {
+    try {
+      var weightData = base64ToArrayBuffer(BLAZEFACE_WEIGHTS_BASE64);
+      var handler = tf.io.fromMemory({
+        modelTopology: BLAZEFACE_MODEL_JSON.modelTopology,
+        weightSpecs: BLAZEFACE_MODEL_JSON.weightsManifest[0].weights,
+        weightData: weightData,
+        format: BLAZEFACE_MODEL_JSON.format,
+        generatedBy: BLAZEFACE_MODEL_JSON.generatedBy,
+        convertedBy: BLAZEFACE_MODEL_JSON.convertedBy,
+      });
+      blazeface.load({ modelUrl: handler }).then(function (model) {
+        faceModel = model;
+      }).catch(function () {
         faceModelFailed = true;
-      }
+      });
+    } catch (e) {
+      faceModelFailed = true;
     }
-    tryLoad();
   })();
 
   function post(message) {
