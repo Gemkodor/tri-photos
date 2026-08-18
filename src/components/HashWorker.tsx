@@ -1,4 +1,5 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import * as FileSystem from 'expo-file-system/legacy';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import {
@@ -7,6 +8,35 @@ import {
   BLAZEFACE_WEIGHTS_BASE64,
   TF_JS_SOURCE,
 } from '../assets/faceModel.generated';
+
+const FACE_MODEL_DIR = (FileSystem.cacheDirectory ?? '') + 'facemodel/';
+
+/**
+ * Writes tf.js, blazeface, and the blazeface model out as real files instead
+ * of embedding them inline in the WebView's HTML: that inline HTML crosses
+ * into the native WebView as a single message, and Android has a hard cap
+ * on how much data that can carry at once (around 1MB) - comfortably over
+ * that (the embedded libraries alone are ~1.5MB) silently broke the page
+ * load, which was hanging (and eventually timing out) every single photo,
+ * not just face detection. Loading them as files the WebView reads off disk
+ * itself has no such limit.
+ */
+async function ensureFaceModelFiles(): Promise<void> {
+  // Written once and reused across scans/app launches (same cache directory
+  // each time) - re-writing ~2MB before every single scan would be wasteful.
+  const marker = await FileSystem.getInfoAsync(FACE_MODEL_DIR + 'model.json');
+  if (marker.exists) return;
+
+  await FileSystem.makeDirectoryAsync(FACE_MODEL_DIR, { intermediates: true });
+  await Promise.all([
+    FileSystem.writeAsStringAsync(FACE_MODEL_DIR + 'tf.min.js', TF_JS_SOURCE),
+    FileSystem.writeAsStringAsync(FACE_MODEL_DIR + 'blazeface.min.js', BLAZEFACE_JS_SOURCE),
+    FileSystem.writeAsStringAsync(FACE_MODEL_DIR + 'model.json', JSON.stringify(BLAZEFACE_MODEL_JSON)),
+    FileSystem.writeAsStringAsync(FACE_MODEL_DIR + 'group1-shard1of1.bin', BLAZEFACE_WEIGHTS_BASE64, {
+      encoding: FileSystem.EncodingType.Base64,
+    }),
+  ]);
+}
 
 // Difference-hash (dHash): the tiny image is 9x8 pixels; for each of the 8
 // rows we compare 8 adjacent pixel pairs, giving a 64-bit fingerprint that's
@@ -25,12 +55,16 @@ import {
 // found, it falls back to whole-image sharpness like before.
 //
 // tf.js, blazeface, and the blazeface model weights are all vendored into
-// the app (see ../assets/faceModel.generated.ts) rather than fetched from a
-// CDN at scan time: this used to make a real network call for every scan,
-// and on a slow connection that call could block the page from finishing
-// load at all - which blocked hashing every photo behind it, not just face
-// detection. Bundling them means face detection works with no internet
-// connection, and can never again hold up anything else.
+// the app (see ../assets/faceModel.generated.ts, written to disk by
+// ensureFaceModelFiles above) rather than fetched from a CDN at scan time:
+// this used to make a real network call for every scan, and on a slow
+// connection that call could block the page from finishing load at all -
+// which blocked hashing every photo behind it, not just face detection.
+// They're loaded here as plain local files (not embedded inline in this
+// HTML) because the inline HTML has to cross into the native WebView as a
+// single message, and Android caps how much that can carry at once - these
+// libraries alone are bigger than that cap. Local files the WebView reads
+// off disk itself have no such limit, and still need no internet connection.
 const ANALYZE_HTML = `
 <!DOCTYPE html>
 <html>
@@ -38,8 +72,8 @@ const ANALYZE_HTML = `
 <body style="margin:0">
 <canvas id="c" width="9" height="8" style="display:none"></canvas>
 <canvas id="b" width="220" height="220" style="display:none"></canvas>
-<script>${TF_JS_SOURCE}</script>
-<script>${BLAZEFACE_JS_SOURCE}</script>
+<script src="tf.min.js"></script>
+<script src="blazeface.min.js"></script>
 <script>
   var hashCanvas = document.getElementById('c');
   var hashCtx = hashCanvas.getContext('2d');
@@ -47,32 +81,11 @@ const ANALYZE_HTML = `
   var blurCtx = blurCanvas.getContext('2d');
   var BLUR_SIZE = 220;
 
-  var BLAZEFACE_MODEL_JSON = ${JSON.stringify(BLAZEFACE_MODEL_JSON)};
-  var BLAZEFACE_WEIGHTS_BASE64 = ${JSON.stringify(BLAZEFACE_WEIGHTS_BASE64)};
-
-  function base64ToArrayBuffer(base64) {
-    var binary = atob(base64);
-    var bytes = new Uint8Array(binary.length);
-    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes.buffer;
-  }
-
   var faceModel = null;
   var faceModelFailed = false;
-  // Loads the model straight from the bundled bytes above (tf.io.fromMemory)
-  // instead of tf.loadGraphModel(url) - no fetch, no network, ever.
   (function loadFaceModel() {
     try {
-      var weightData = base64ToArrayBuffer(BLAZEFACE_WEIGHTS_BASE64);
-      var handler = tf.io.fromMemory({
-        modelTopology: BLAZEFACE_MODEL_JSON.modelTopology,
-        weightSpecs: BLAZEFACE_MODEL_JSON.weightsManifest[0].weights,
-        weightData: weightData,
-        format: BLAZEFACE_MODEL_JSON.format,
-        generatedBy: BLAZEFACE_MODEL_JSON.generatedBy,
-        convertedBy: BLAZEFACE_MODEL_JSON.convertedBy,
-      });
-      blazeface.load({ modelUrl: handler }).then(function (model) {
+      blazeface.load({ modelUrl: 'model.json' }).then(function (model) {
         faceModel = model;
       }).catch(function () {
         faceModelFailed = true;
@@ -258,9 +271,25 @@ const REQUEST_TIMEOUT_MS = 25000;
 const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
   const webViewRef = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
+  const [assetsReady, setAssetsReady] = useState(false);
   const pending = useRef<Map<number, PendingEntry>>(new Map());
   const nextId = useRef(0);
   const queue = useRef<Array<{ id: number; base64: string }>>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    ensureFaceModelFiles()
+      .catch(() => {
+        // Face detection just won't be available this scan - hashing itself
+        // doesn't depend on any of this.
+      })
+      .finally(() => {
+        if (!cancelled) setAssetsReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function flushQueue() {
     if (!ready) return;
@@ -315,11 +344,16 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
     }
   }
 
+  if (!assetsReady) return null;
+
   return (
     <WebView
       ref={webViewRef}
       originWhitelist={['*']}
-      source={{ html: ANALYZE_HTML }}
+      source={{ html: ANALYZE_HTML, baseUrl: 'file://' + FACE_MODEL_DIR }}
+      allowFileAccess
+      allowFileAccessFromFileURLs
+      allowUniversalAccessFromFileURLs
       onLoadEnd={() => {
         setReady(true);
         flushQueue();
