@@ -109,6 +109,29 @@ export function hammingDistance(a: [number, number], b: [number, number]): numbe
   return popcount32(a[0] ^ b[0]) + popcount32(a[1] ^ b[1]);
 }
 
+export type ClosestPair = { a: HashedPhoto; b: HashedPhoto; distance: number };
+
+/**
+ * Finds the two photos in the whole set whose hashes are the closest match,
+ * regardless of any threshold. Used to show "how close is close" when no
+ * duplicate group meets the current threshold - a concrete number to check
+ * against instead of guessing blindly at why a pair wasn't grouped.
+ */
+export function findClosestPair(photos: HashedPhoto[]): ClosestPair | null {
+  if (photos.length < 2) return null;
+  const packed = photos.map((p) => packHash(p.hash));
+  let best: ClosestPair | null = null;
+  for (let i = 0; i < photos.length; i++) {
+    for (let j = i + 1; j < photos.length; j++) {
+      const distance = hammingDistance(packed[i], packed[j]);
+      if (!best || distance < best.distance) {
+        best = { a: photos[i], b: photos[j], distance };
+      }
+    }
+  }
+  return best;
+}
+
 export type DuplicateGroup = {
   id: string;
   photos: HashedPhoto[];

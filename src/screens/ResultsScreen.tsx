@@ -14,6 +14,7 @@ import PhotoViewer from '../components/PhotoViewer';
 import {
   bestPhotoReason,
   computeSharpnessBaseline,
+  findClosestPair,
   groupKey,
   isBlurryPhoto,
   nextSortMode,
@@ -191,6 +192,14 @@ export default function ResultsScreen({
     exitKeepMode();
   }
 
+  // Only computed to help make sense of an empty "duplicates" result: shows
+  // how close the nearest two photos actually got, so there's a concrete
+  // number to check instead of guessing why a pair wasn't grouped.
+  const closestPair = useMemo(
+    () => (mode === 'duplicates' && groups.length === 0 ? findClosestPair(allPhotos) : null),
+    [mode, groups.length, allPhotos]
+  );
+
   const headerTitle = (() => {
     if (mode === 'blurry') {
       return blurryPhotos.length === 0
@@ -237,6 +246,12 @@ export default function ResultsScreen({
           })}
         </View>
         <Text style={styles.headerTitle}>{headerTitle}</Text>
+        {closestPair && (
+          <Text style={styles.closestPairHint}>
+            Les 2 photos les plus proches : {closestPair.a.name} et {closestPair.b.name} (
+            {thresholdToPercent(closestPair.distance)}% pareilles)
+          </Text>
+        )}
         {hasGroups && reviewedCount > 0 && (
           <Pressable onPress={() => setShowReviewed((v) => !v)} hitSlop={8}>
             <Text style={styles.reviewedToggle}>
@@ -803,6 +818,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.primary,
     fontWeight: '600',
+  },
+  closestPairHint: {
+    marginTop: 6,
+    fontSize: 13,
+    color: colors.subtleText,
   },
   reminderBanner: {
     marginTop: 12,
