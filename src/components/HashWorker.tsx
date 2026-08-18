@@ -27,8 +27,17 @@ const ANALYZE_HTML = `
 <body style="margin:0">
 <canvas id="c" width="9" height="8" style="display:none"></canvas>
 <canvas id="b" width="220" height="220" style="display:none"></canvas>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.0/dist/blazeface.min.js"></script>
+<!--
+  async: on a slow or absent network, a normal blocking <script src> can
+  hold up the page's load-complete event for a long time (until the request
+  finally resolves or fails), which held up every single photo's hashing
+  behind it - even hashing has nothing to do with face detection. Loading
+  these in the background instead means the page (and hashing) is ready
+  immediately; face detection just silently stays unavailable until (or
+  unless) these finish loading, same as when the CDN can't be reached at all.
+-->
+<script async src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script async src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.0/dist/blazeface.min.js"></script>
 <script>
   var hashCanvas = document.getElementById('c');
   var hashCtx = hashCanvas.getContext('2d');
@@ -38,20 +47,33 @@ const ANALYZE_HTML = `
 
   var faceModel = null;
   var faceModelFailed = false;
+  // tf/blazeface load in the background (see the async script tags above),
+  // so they're very unlikely to be ready the instant this runs. Poll for a
+  // while instead of checking once - long enough to give a real network a
+  // fair chance, short enough to still give up cleanly on a bad one.
+  var FACE_MODEL_LOAD_TIMEOUT_MS = 8000;
   (function loadFaceModel() {
-    try {
-      if (typeof tf === 'undefined' || typeof blazeface === 'undefined') {
+    var start = Date.now();
+    function tryLoad() {
+      try {
+        if (typeof tf === 'undefined' || typeof blazeface === 'undefined') {
+          if (Date.now() - start > FACE_MODEL_LOAD_TIMEOUT_MS) {
+            faceModelFailed = true;
+            return;
+          }
+          setTimeout(tryLoad, 150);
+          return;
+        }
+        blazeface.load().then(function (model) {
+          faceModel = model;
+        }).catch(function () {
+          faceModelFailed = true;
+        });
+      } catch (e) {
         faceModelFailed = true;
-        return;
       }
-      blazeface.load().then(function (model) {
-        faceModel = model;
-      }).catch(function () {
-        faceModelFailed = true;
-      });
-    } catch (e) {
-      faceModelFailed = true;
     }
+    tryLoad();
   })();
 
   function post(message) {
