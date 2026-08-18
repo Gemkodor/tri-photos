@@ -246,6 +246,12 @@ export default function ResultsScreen({
           })}
         </View>
         <Text style={styles.headerTitle}>{headerTitle}</Text>
+        {hasGroups && (
+          <Text style={styles.closestPairHint}>
+            {allPhotos.length} photo{allPhotos.length > 1 ? 's' : ''} analysée
+            {allPhotos.length > 1 ? 's' : ''} au total
+          </Text>
+        )}
         {closestPair && (
           <Text style={styles.closestPairHint}>
             Les 2 photos les plus proches : {closestPair.a.name} et {closestPair.b.name} (

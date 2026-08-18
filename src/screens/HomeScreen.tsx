@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SORT_STEPS, SORT_STEP_ORDER, type SortMode } from '../lib/duplicateGroups';
 import { colors } from '../theme';
 
@@ -21,7 +21,7 @@ export default function HomeScreen({
   onOpenTrash,
 }: Props) {
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.hero}>
         <Text style={styles.title}>Tri Photos</Text>
         <Text style={styles.subtitle}>
@@ -65,7 +65,7 @@ export default function HomeScreen({
           <Text style={styles.reminderBannerText}>🗑 {trashReminder}</Text>
         </Pressable>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -73,7 +73,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  contentContainer: {
     padding: 24,
+    paddingTop: 32,
+    flexGrow: 1,
     justifyContent: 'center',
   },
   hero: {
