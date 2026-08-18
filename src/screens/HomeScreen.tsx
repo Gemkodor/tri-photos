@@ -1,18 +1,21 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SORT_STEPS, SORT_STEP_ORDER, type SortMode } from '../lib/duplicateGroups';
 import { colors } from '../theme';
 
 type Props = {
   hasLastFolder: boolean;
   trashCount: number;
-  onPickFolder: () => void;
-  onRescanLastFolder: () => void;
+  trashReminder: string | null;
+  onPickFolder: (mode: SortMode) => void;
+  onRescanLastFolder: (mode: SortMode) => void;
   onOpenTrash: () => void;
 };
 
 export default function HomeScreen({
   hasLastFolder,
   trashCount,
+  trashReminder,
   onPickFolder,
   onRescanLastFolder,
   onOpenTrash,
@@ -22,27 +25,44 @@ export default function HomeScreen({
       <View style={styles.hero}>
         <Text style={styles.title}>Tri Photos</Text>
         <Text style={styles.subtitle}>
-          Choisis un dossier de photos sur ton téléphone. L'appli regarde chaque photo et te
-          montre celles qui se ressemblent, pour t'aider à repérer les doublons avant de faire ton
-          album.
+          Ton assistant de tri, étape par étape. Choisis une étape ci-dessous pour commencer.
         </Text>
       </View>
 
-      <Pressable style={styles.primaryButton} onPress={onPickFolder}>
-        <Text style={styles.primaryButtonText}>Choisir un dossier à analyser</Text>
-      </Pressable>
-
-      {hasLastFolder && (
-        <Pressable style={styles.secondaryButton} onPress={onRescanLastFolder}>
-          <Text style={styles.secondaryButtonText}>Relancer l'analyse du dernier dossier</Text>
-        </Pressable>
-      )}
+      {SORT_STEP_ORDER.map((mode, index) => {
+        const step = SORT_STEPS[mode];
+        return (
+          <View key={mode} style={styles.stepCard}>
+            <View style={styles.stepBadge}>
+              <Text style={styles.stepBadgeText}>{index + 1}</Text>
+            </View>
+            <View style={styles.stepContent}>
+              <Text style={styles.stepTitle}>{step.title}</Text>
+              <Text style={styles.stepDescription}>{step.description}</Text>
+              <Pressable style={styles.stepButton} onPress={() => onPickFolder(mode)}>
+                <Text style={styles.stepButtonText}>Choisir un dossier</Text>
+              </Pressable>
+              {hasLastFolder && (
+                <Pressable style={styles.stepLink} onPress={() => onRescanLastFolder(mode)}>
+                  <Text style={styles.stepLinkText}>Relancer sur le dernier dossier</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        );
+      })}
 
       {trashCount > 0 && (
         <Pressable style={styles.trashButton} onPress={onOpenTrash}>
           <Text style={styles.trashButtonText}>
             Voir la corbeille ({trashCount} photo{trashCount > 1 ? 's' : ''})
           </Text>
+        </Pressable>
+      )}
+
+      {trashReminder && (
+        <Pressable style={styles.reminderBanner} onPress={onOpenTrash}>
+          <Text style={styles.reminderBannerText}>🗑 {trashReminder}</Text>
         </Pressable>
       )}
     </View>
@@ -57,50 +77,96 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hero: {
-    marginBottom: 40,
+    marginBottom: 24,
   },
   title: {
     fontSize: 32,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: colors.subtleText,
-    lineHeight: 22,
+    lineHeight: 21,
   },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-  },
-  primaryButtonText: {
-    color: colors.primaryText,
-    fontSize: 17,
-    fontWeight: '600',
-  },
-  secondaryButton: {
-    marginTop: 14,
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: 'center',
+  stepCard: {
+    flexDirection: 'row',
+    backgroundColor: colors.card,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 14,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  secondaryButtonText: {
-    color: colors.text,
+  stepBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  stepBadgeText: {
+    color: colors.primaryText,
     fontSize: 15,
-    fontWeight: '500',
+    fontWeight: '700',
+  },
+  stepContent: {
+    flex: 1,
+  },
+  stepTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 6,
+  },
+  stepDescription: {
+    fontSize: 13,
+    color: colors.subtleText,
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  stepButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  stepButtonText: {
+    color: colors.primaryText,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  stepLink: {
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  stepLinkText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '600',
   },
   trashButton: {
-    marginTop: 28,
+    marginTop: 14,
     alignItems: 'center',
   },
   trashButtonText: {
     color: colors.subtleText,
     fontSize: 14,
     textDecorationLine: 'underline',
+  },
+  reminderBanner: {
+    marginTop: 20,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: colors.dangerBackground,
+  },
+  reminderBannerText: {
+    color: colors.danger,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
   },
 });

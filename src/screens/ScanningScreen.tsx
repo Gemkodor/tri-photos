@@ -1,11 +1,15 @@
+import { Image } from 'expo-image';
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../theme';
 
 export type ScanStatus = {
   phase: 'listing' | 'hashing';
   foundImages: number;
   hashedCount: number;
+  /** The photo currently being looked at, shown as a live preview so there's
+   *  something to watch during a long analysis. */
+  currentPhotoUri?: string | null;
 };
 
 export default function ScanningScreen({ status }: { status: ScanStatus }) {
@@ -14,7 +18,18 @@ export default function ScanningScreen({ status }: { status: ScanStatus }) {
   const progress = isHashing ? Math.min(status.hashedCount / total, 1) : 0;
 
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
+      {status.currentPhotoUri && (
+        <View style={styles.previewCard}>
+          <Image
+            key={status.currentPhotoUri}
+            source={{ uri: status.currentPhotoUri }}
+            style={styles.previewImage}
+            contentFit="cover"
+          />
+        </View>
+      )}
+
       <Text style={styles.title}>
         {isHashing ? 'Analyse visuelle des photos…' : 'Recherche des photos…'}
       </Text>
@@ -35,30 +50,44 @@ export default function ScanningScreen({ status }: { status: ScanStatus }) {
       <Text style={styles.hint}>
         Ça peut prendre un moment si le dossier contient beaucoup de photos et de sous-dossiers.
       </Text>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flexGrow: 1,
     backgroundColor: colors.background,
     padding: 24,
-    justifyContent: 'center',
+    paddingTop: 32,
     alignItems: 'center',
   },
+  previewCard: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 24,
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
   title: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
     color: colors.text,
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: colors.subtleText,
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 18,
   },
   progressTrack: {
     width: '100%',
@@ -73,7 +102,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   hint: {
-    marginTop: 28,
+    marginTop: 20,
     fontSize: 13,
     color: colors.subtleText,
     textAlign: 'center',

@@ -22,8 +22,12 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      "expo-image"
-    ]
+    "plugins": ["./plugins/withForegroundService.js"],
+    "extra": {
+      "eas": {
+        "projectId": "50a287a1-0626-4523-b714-dbb8c6d479de"
+      }
+    },
+    "owner": "ellanashaes-team"
   }
 }

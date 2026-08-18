@@ -6,10 +6,19 @@ import type { ImageFile } from './imageFiles';
 export type HashedPhoto = {
   uri: string;
   name: string;
+  /** Folder the file lives in, e.g. "Pictures/Vacances". */
+  folderPath: string;
   /** Size in bytes of the file, used as a rough "which copy is better" hint. */
   sizeBytes: number | null;
+  /** Original pixel dimensions, when available. */
+  width: number | null;
+  height: number | null;
   /** 64-bit dHash, as a string of '0'/'1' characters. */
   hash: string;
+  /** Higher means sharper - only meaningful relative to other photos in the same group. */
+  sharpness: number;
+  /** True when sharpness was measured on a detected face rather than the whole photo. */
+  facesFound: boolean;
 };
 
 const TEMP_DIR = (FileSystem.cacheDirectory ?? '') + 'tri-photos-tmp/';
@@ -44,13 +53,37 @@ export async function hashPhoto(
       sizeBytes = null;
     }
 
+    let width: number | null = null;
+    let height: number | null = null;
+    try {
+      const original = await ImageManipulator.manipulate(localUri).renderAsync();
+      width = original.width;
+      height = original.height;
+    } catch {
+      // Keep width/height as null - not critical, just informational.
+    }
+
+    // Resized to 256x256 (not the final 9x8 hash size) so the worker still
+    // has enough real detail left to judge sharpness - too small a source
+    // and blur differences get smoothed away before they can be measured.
+    // The worker itself shrinks this further for each purpose.
     const context = ImageManipulator.manipulate(localUri);
-    const rendered = await context.resize({ width: 9, height: 8 }).renderAsync();
+    const rendered = await context.resize({ width: 256, height: 256 }).renderAsync();
     const saved = await rendered.saveAsync({ format: SaveFormat.PNG, base64: true });
     if (!saved.base64) return null;
 
-    const hash = await worker.computeHash(saved.base64);
-    return { uri: photo.uri, name: photo.name, sizeBytes, hash };
+    const { hash, sharpness, facesFound } = await worker.computeMetrics(saved.base64);
+    return {
+      uri: photo.uri,
+      name: photo.name,
+      folderPath: photo.folderPath,
+      sizeBytes,
+      width,
+      height,
+      hash,
+      sharpness,
+      facesFound,
+    };
   } catch {
     return null;
   } finally {

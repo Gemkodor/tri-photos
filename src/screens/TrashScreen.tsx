@@ -6,30 +6,39 @@ import { colors } from '../theme';
 
 type Props = {
   entries: TrashEntry[];
-  onDeleteOne: (id: string) => void;
-  onEmptyAll: () => void;
+  onSetAsideOne: (id: string) => void;
+  onSetAsideAll: () => void;
+  onRestoreOne: (id: string) => void;
+  onRestoreAll: () => void;
   onBack: () => void;
 };
 
-export default function TrashScreen({ entries, onDeleteOne, onEmptyAll, onBack }: Props) {
-  function confirmDeleteOne(id: string, name: string) {
+export default function TrashScreen({
+  entries,
+  onSetAsideOne,
+  onSetAsideAll,
+  onRestoreOne,
+  onRestoreAll,
+  onBack,
+}: Props) {
+  function confirmSetAsideOne(id: string, name: string) {
     Alert.alert(
-      'Supprimer pour de bon ?',
-      `"${name}" sera supprimée définitivement de ton téléphone.`,
+      'Ranger cette photo ?',
+      `"${name}" sera déplacée dans un dossier "De côté", à l'intérieur du dossier analysé. Rien n'est supprimé, tu pourras toujours la retrouver.`,
       [
         { text: 'Annuler', style: 'cancel' },
-        { text: 'Supprimer', style: 'destructive', onPress: () => onDeleteOne(id) },
+        { text: 'Ranger', onPress: () => onSetAsideOne(id) },
       ]
     );
   }
 
-  function confirmEmptyAll() {
+  function confirmSetAsideAll() {
     Alert.alert(
-      'Vider la corbeille ?',
-      `Les ${entries.length} photo${entries.length > 1 ? 's' : ''} seront supprimées définitivement de ton téléphone.`,
+      'Ranger ces photos ?',
+      `Les ${entries.length} photo${entries.length > 1 ? 's' : ''} seront déplacées dans un dossier "De côté", à l'intérieur du dossier analysé. Rien n'est supprimé, tu pourras toujours les retrouver.`,
       [
         { text: 'Annuler', style: 'cancel' },
-        { text: 'Tout supprimer', style: 'destructive', onPress: onEmptyAll },
+        { text: 'Tout ranger', onPress: onSetAsideAll },
       ]
     );
   }
@@ -43,7 +52,8 @@ export default function TrashScreen({ entries, onDeleteOne, onEmptyAll, onBack }
         <Text style={styles.headerTitle}>Corbeille</Text>
         <Text style={styles.headerSubtitle}>
           Ces photos ont été retirées de leur dossier. Elles restent sur ton téléphone, en
-          sécurité, tant que tu ne les supprimes pas ici pour de bon.
+          sécurité. Range-les dans "De côté" pour vraiment libérer de la place dans le dossier
+          d'origine, ou restaure-les si tu as changé d'avis - rien n'est jamais supprimé.
         </Text>
       </View>
 
@@ -63,18 +73,29 @@ export default function TrashScreen({ entries, onDeleteOne, onEmptyAll, onBack }
                 <Text style={styles.rowName} numberOfLines={1}>
                   {item.originalName}
                 </Text>
-                <Pressable
-                  style={styles.deleteRowButton}
-                  onPress={() => confirmDeleteOne(item.id, item.originalName)}
-                >
-                  <Text style={styles.deleteRowButtonText}>Supprimer</Text>
-                </Pressable>
+                <View style={styles.rowActions}>
+                  <Pressable
+                    style={styles.restoreRowButton}
+                    onPress={() => onRestoreOne(item.id)}
+                  >
+                    <Text style={styles.restoreRowButtonText}>Restaurer</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.setAsideRowButton}
+                    onPress={() => confirmSetAsideOne(item.id, item.originalName)}
+                  >
+                    <Text style={styles.setAsideRowButtonText}>Ranger</Text>
+                  </Pressable>
+                </View>
               </View>
             )}
           />
           <View style={styles.bottomBar}>
-            <Pressable style={styles.emptyAllButton} onPress={confirmEmptyAll}>
-              <Text style={styles.emptyAllButtonText}>Vider la corbeille</Text>
+            <Pressable style={styles.setAsideAllButton} onPress={confirmSetAsideAll}>
+              <Text style={styles.setAsideAllButtonText}>Tout ranger dans "De côté"</Text>
+            </Pressable>
+            <Pressable style={styles.restoreAllButton} onPress={onRestoreAll}>
+              <Text style={styles.restoreAllButtonText}>Tout restaurer</Text>
             </Pressable>
           </View>
         </>
@@ -120,7 +141,7 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingHorizontal: 20,
-    paddingBottom: 100,
+    paddingBottom: 130,
   },
   row: {
     flexDirection: 'row',
@@ -145,14 +166,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text,
   },
-  deleteRowButton: {
+  rowActions: {
+    alignItems: 'flex-end',
+  },
+  restoreRowButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginBottom: 6,
+  },
+  restoreRowButtonText: {
+    color: colors.subtleText,
+    fontSize: 12,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  setAsideRowButton: {
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 10,
-    backgroundColor: colors.dangerBackground,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.primary,
   },
-  deleteRowButtonText: {
-    color: colors.danger,
+  setAsideRowButtonText: {
+    color: colors.primary,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -167,16 +204,25 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  emptyAllButton: {
+  setAsideAllButton: {
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.danger,
+    backgroundColor: colors.primary,
   },
-  emptyAllButtonText: {
-    color: colors.danger,
+  setAsideAllButtonText: {
+    color: colors.primaryText,
     fontSize: 15,
     fontWeight: '600',
+  },
+  restoreAllButton: {
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  restoreAllButtonText: {
+    color: colors.subtleText,
+    fontSize: 13,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });

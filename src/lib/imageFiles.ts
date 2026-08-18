@@ -1,4 +1,5 @@
 import { StorageAccessFramework } from 'expo-file-system/legacy';
+import { SET_ASIDE_FOLDER_NAME } from './trash';
 
 const IMAGE_EXTENSIONS = new Set([
   'jpg',
@@ -16,6 +17,8 @@ export type ImageFile = {
   uri: string;
   /** Best-effort display file name, including extension. */
   name: string;
+  /** Best-effort folder path the file lives in (e.g. "Pictures/Vacances"). */
+  folderPath: string;
 };
 
 /**
@@ -34,6 +37,26 @@ function getDisplayName(uri: string): string {
     return afterColon.split('/').pop() ?? afterColon;
   } catch {
     return uri;
+  }
+}
+
+/**
+ * Extracts the folder portion of a SAF document URI, e.g. for
+ * ".../document/primary%3APictures%2FVacances%2FIMG_001.jpg" -> "Pictures/Vacances".
+ * Best-effort: returns '' if the shape doesn't match what's expected.
+ */
+function getFolderPath(uri: string): string {
+  try {
+    const decoded = decodeURIComponent(uri);
+    const docMarker = '/document/';
+    const idx = decoded.indexOf(docMarker);
+    const afterDoc = idx === -1 ? decoded : decoded.slice(idx + docMarker.length);
+    const afterColon = afterDoc.includes(':') ? afterDoc.slice(afterDoc.indexOf(':') + 1) : afterDoc;
+    const parts = afterColon.split('/').filter(Boolean);
+    parts.pop();
+    return parts.join('/');
+  } catch {
+    return '';
   }
 }
 
@@ -90,10 +113,14 @@ export async function scanFolderForImages(
     for (const entryUri of entries) {
       const name = getDisplayName(entryUri);
       if (isImageName(name)) {
-        images.push({ uri: entryUri, name });
+        images.push({ uri: entryUri, name, folderPath: getFolderPath(entryUri) });
         onProgress?.({ foundImages: images.length, scannedFolders });
         continue;
       }
+      // Never re-scan the app's own "De côté" folder - photos set aside in a
+      // previous analysis would otherwise keep reappearing as "new" duplicates.
+      if (name === SET_ASIDE_FOLDER_NAME) continue;
+
       // Not a recognizable image name: could be a sub-folder, could be some
       // other file type. Try to list it; only folders will succeed.
       try {
