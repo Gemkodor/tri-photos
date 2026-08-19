@@ -30,13 +30,23 @@ const FACE_MODEL_DIR = (FileSystem.cacheDirectory ?? '') + 'facemodel/';
  * not just face detection. Loading them as files the WebView reads off disk
  * itself has no such limit.
  */
+const FACE_MODEL_FILES = ['tf.min.js', 'blazeface.min.js', 'model.json', 'group1-shard1of1.bin'];
+
 async function ensureFaceModelFiles(): Promise<void> {
   if (!FACE_DETECTION_ENABLED) return;
 
   // Written once and reused across scans/app launches (same cache directory
-  // each time) - re-writing ~2MB before every single scan would be wasteful.
-  const marker = await FileSystem.getInfoAsync(FACE_MODEL_DIR + 'model.json');
-  if (marker.exists) return;
+  // each time) - re-writing ~2MB before every single scan would be
+  // wasteful. Checks every file, not just one: an earlier attempt could
+  // have been interrupted partway through (e.g. the app was closed mid-scan
+  // during testing), leaving some files present and others missing - which
+  // would silently and permanently fail every face detection from then on,
+  // since a single missing file (like the library itself) breaks the
+  // <script src> chain that depends on it.
+  const infos = await Promise.all(
+    FACE_MODEL_FILES.map((name) => FileSystem.getInfoAsync(FACE_MODEL_DIR + name))
+  );
+  if (infos.every((info) => info.exists)) return;
 
   await FileSystem.makeDirectoryAsync(FACE_MODEL_DIR, { intermediates: true });
   await Promise.all([
