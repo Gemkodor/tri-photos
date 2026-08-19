@@ -70,7 +70,9 @@ export const SORT_STEPS: Record<
     shortTitle: 'Similaires',
     description:
       "Regroupe les photos prises à la suite (même scène, plusieurs essais), grise celles qui semblent floues, pour t'aider à ne garder que les meilleures.",
-    defaultThreshold: 12,
+    // 25 -> 61%, Flavie's preferred starting point - the slider still moves
+    // freely from there.
+    defaultThreshold: 25,
   },
   final: {
     title: 'Dernière vérification',

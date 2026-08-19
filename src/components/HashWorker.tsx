@@ -9,15 +9,14 @@ import {
   TF_JS_SOURCE,
 } from '../assets/faceModel.generated';
 
-// Temporarily off: every way tried so far of loading face detection into
-// this WebView (CDN, embedded inline, local files) has ended the same way -
-// every single photo timing out, not just face detection, which points at
-// tf.js/blazeface itself being too much for this WebView to handle right
-// now rather than any particular loading method. Hashing and whole-image
-// sharpness don't need any of this, so turning it off gets the core
-// duplicate/blur finding working again while that gets investigated
-// separately, instead of leaving it broken for everything.
-const FACE_DETECTION_ENABLED = false;
+// Was off for a while: every way tried to load face detection into this
+// WebView kept timing out on every single photo, not just face detection,
+// which looked like tf.js/blazeface itself being too much for the WebView.
+// The real cause turned out to be unrelated - a stale-closure bug in this
+// file's own "ready" handling (see readyRef below) that could make the very
+// first photo's job never get sent at all, regardless of what was or
+// wasn't loaded. Now that that's fixed, back on.
+const FACE_DETECTION_ENABLED = true;
 
 const FACE_MODEL_DIR = (FileSystem.cacheDirectory ?? '') + 'facemodel/';
 
