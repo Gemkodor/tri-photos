@@ -12,6 +12,7 @@ import {
 import {
   groupDuplicates,
   groupKey,
+  SORT_STEP_ORDER,
   SORT_STEPS,
   type SortMode,
 } from './src/lib/duplicateGroups';
@@ -46,6 +47,12 @@ export default function App() {
     hashedCount: 0,
   });
   const [hashedPhotos, setHashedPhotos] = useState<HashedPhoto[]>([]);
+  // The duplicates step deliberately skips computing sharpness (it doesn't
+  // need it, and skipping it keeps that step as fast as possible - see
+  // hashPhoto's needSharpness option) - so hashedPhotos from that step alone
+  // can't be reused for the similar/final steps, which do need it. Tracks
+  // whether a real rescan is needed when moving to one of those.
+  const [hasSharpness, setHasSharpness] = useState(true);
   const [mode, setMode] = useState<SortMode>('duplicates');
   const [similarityThreshold, setSimilarityThreshold] = useState(
     SORT_STEPS.duplicates.defaultThreshold
@@ -72,7 +79,12 @@ export default function App() {
         setHashedPhotos(saved.hashedPhotos);
         setSimilarityThreshold(saved.similarityThreshold);
         setReviewedGroupKeys(new Set(saved.reviewedGroupKeys ?? []));
-        setMode(saved.mode ?? 'duplicates');
+        // A save from an older version of the app could carry a step that
+        // no longer exists (the sorting path has changed over time) - fall
+        // back rather than restoring into a step the app can't render.
+        const restoredMode = saved.mode && SORT_STEP_ORDER.includes(saved.mode) ? saved.mode : 'duplicates';
+        setMode(restoredMode);
+        setHasSharpness(restoredMode !== 'duplicates');
         setScreen('results');
       }
     });
@@ -114,7 +126,9 @@ export default function App() {
           hashedCount: i,
           currentPhotoUri: images[i].uri,
         });
-        const { photo, error } = await hashPhoto(images[i], worker);
+        const { photo, error } = await hashPhoto(images[i], worker, {
+          needSharpness: forMode !== 'duplicates',
+        });
         if (photo) hashed.push(photo);
         else if (error && !firstError) firstError = error;
         setScanStatus({
@@ -143,6 +157,7 @@ export default function App() {
 
       const threshold = SORT_STEPS[forMode].defaultThreshold;
       setHashedPhotos(hashed);
+      setHasSharpness(forMode !== 'duplicates');
       setMode(forMode);
       setSimilarityThreshold(threshold);
       setSelected(new Set());
@@ -245,6 +260,13 @@ export default function App() {
   }
 
   function switchMode(newMode: SortMode) {
+    // The step being left has only ever computed a bare hash (no
+    // sharpness) - the target step needs sharpness, so the existing data
+    // isn't enough and a real rescan is needed rather than just switching.
+    if (newMode !== 'duplicates' && !hasSharpness && lastFolderUri) {
+      analyzeFolder(lastFolderUri, newMode);
+      return;
+    }
     const threshold = SORT_STEPS[newMode].defaultThreshold;
     setMode(newMode);
     setSimilarityThreshold(threshold);

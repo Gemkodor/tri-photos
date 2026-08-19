@@ -232,13 +232,22 @@ ${
     }
   }
 
-  async function handleAnalyze(id, base64) {
+  function handleAnalyze(id, base64, needSharpness) {
     var img = new Image();
     img.onload = async function () {
       try {
         hashCtx.clearRect(0, 0, 9, 8);
         hashCtx.drawImage(img, 0, 0, 9, 8);
         var hash = computeHashBits();
+
+        // The duplicates step only ever needs the hash - skipping the
+        // sharpness/face-detection work entirely keeps that step (often run
+        // first, on a big folder with lots of subfolders) as fast and
+        // simple as possible.
+        if (!needSharpness) {
+          post({ id: id, hash: hash, sharpness: 0, facesFound: false });
+          return;
+        }
 
         blurCtx.clearRect(0, 0, BLUR_SIZE, BLUR_SIZE);
         blurCtx.drawImage(img, 0, 0, BLUR_SIZE, BLUR_SIZE);
@@ -288,8 +297,16 @@ type PendingEntry = {
 };
 
 export type HashWorkerHandle = {
-  /** Computes the dHash and a sharpness score for a tiny base64-encoded PNG. */
-  computeMetrics: (base64Png: string) => Promise<PhotoMetrics>;
+  /**
+   * Computes the dHash and, unless `needSharpness` is explicitly false, a
+   * sharpness score for a tiny base64-encoded PNG. Skipping sharpness (the
+   * duplicates step doesn't use it at all) keeps that step as fast and
+   * simple as possible.
+   */
+  computeMetrics: (
+    base64Png: string,
+    options?: { needSharpness?: boolean }
+  ) => Promise<PhotoMetrics>;
 };
 
 const REQUEST_TIMEOUT_MS = 25000;
@@ -300,7 +317,7 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
   const [assetsReady, setAssetsReady] = useState(false);
   const pending = useRef<Map<number, PendingEntry>>(new Map());
   const nextId = useRef(0);
-  const queue = useRef<Array<{ id: number; base64: string }>>([]);
+  const queue = useRef<Array<{ id: number; base64: string; needSharpness: boolean }>>([]);
   // Tracks *why* the page never responded, for when a request times out -
   // "the WebView's page never finished loading" vs "it crashed" vs "it
   // loaded fine but never answered" are very different problems to chase,
@@ -328,14 +345,15 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
     queue.current = [];
     for (const job of jobs) {
       webViewRef.current?.injectJavaScript(
-        `handleAnalyze(${JSON.stringify(job.id)}, ${JSON.stringify(job.base64)}); true;`
+        `handleAnalyze(${JSON.stringify(job.id)}, ${JSON.stringify(job.base64)}, ${job.needSharpness}); true;`
       );
     }
   }
 
   useImperativeHandle(ref, () => ({
-    computeMetrics(base64Png: string) {
+    computeMetrics(base64Png: string, options?: { needSharpness?: boolean }) {
       const id = nextId.current++;
+      const needSharpness = options?.needSharpness ?? true;
       return new Promise<PhotoMetrics>((resolve, reject) => {
         const timeout = setTimeout(() => {
           pending.current.delete(id);
@@ -343,7 +361,7 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
           reject(new Error(`hash_timeout (${reason})`));
         }, REQUEST_TIMEOUT_MS);
         pending.current.set(id, { resolve, reject, timeout });
-        queue.current.push({ id, base64: base64Png });
+        queue.current.push({ id, base64: base64Png, needSharpness });
         flushQueue();
       });
     },

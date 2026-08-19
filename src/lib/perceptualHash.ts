@@ -46,7 +46,12 @@ function describeError(e: unknown): string {
  * swallowing it) so a total analysis failure can show *why* instead of just
  * "0 photos" with no way to tell what actually went wrong.
  */
-export async function hashPhoto(photo: ImageFile, worker: HashWorkerHandle): Promise<HashPhotoResult> {
+export async function hashPhoto(
+  photo: ImageFile,
+  worker: HashWorkerHandle,
+  options?: { needSharpness?: boolean }
+): Promise<HashPhotoResult> {
+  const needSharpness = options?.needSharpness ?? true;
   await ensureTempDir();
   const localUri = `${TEMP_DIR}${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
@@ -67,22 +72,30 @@ export async function hashPhoto(photo: ImageFile, worker: HashWorkerHandle): Pro
 
     let width: number | null = null;
     let height: number | null = null;
-    try {
-      const original = await ImageManipulator.manipulate(localUri).renderAsync();
-      width = original.width;
-      height = original.height;
-    } catch {
-      // Keep width/height as null - not critical, just informational.
+    // Skipped for the duplicates-only pass - purely informational, not
+    // needed to compare photos, and the fastest possible check skips
+    // whatever it can.
+    if (needSharpness) {
+      try {
+        const original = await ImageManipulator.manipulate(localUri).renderAsync();
+        width = original.width;
+        height = original.height;
+      } catch {
+        // Keep width/height as null - not critical, just informational.
+      }
     }
 
     // Resized to 256x256 (not the final 9x8 hash size) so the worker still
     // has enough real detail left to judge sharpness - too small a source
     // and blur differences get smoothed away before they can be measured.
-    // The worker itself shrinks this further for each purpose.
+    // The worker itself shrinks this further for each purpose. When
+    // sharpness isn't needed at all (duplicates pass), a much smaller
+    // resize is plenty for the 9x8 hash and is faster to produce and send.
     let base64: string | undefined;
     try {
+      const size = needSharpness ? 256 : 32;
       const context = ImageManipulator.manipulate(localUri);
-      const rendered = await context.resize({ width: 256, height: 256 }).renderAsync();
+      const rendered = await context.resize({ width: size, height: size }).renderAsync();
       const saved = await rendered.saveAsync({ format: SaveFormat.PNG, base64: true });
       base64 = saved.base64;
     } catch (e) {
@@ -92,7 +105,7 @@ export async function hashPhoto(photo: ImageFile, worker: HashWorkerHandle): Pro
 
     let metrics;
     try {
-      metrics = await worker.computeMetrics(base64);
+      metrics = await worker.computeMetrics(base64, { needSharpness });
     } catch (e) {
       return { photo: null, error: `analyse visuelle : ${describeError(e)}` };
     }

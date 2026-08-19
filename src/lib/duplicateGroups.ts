@@ -1,15 +1,18 @@
 import type { HashedPhoto } from './perceptualHash';
 
 /**
- * The sorting path: step 1 catches exact duplicates (fixed at 100% - no
- * wiggle room), step 2 sorts out blurry photos across the whole folder,
- * step 3 groups photos from the same shooting session (burst shots) so the
- * user can pick the keepers, and step 4 is a final pass over every photo
- * still in the folder before wrapping up.
+ * The sorting path: step 1 is its own, separate, deliberately simple pass
+ * that just catches exact duplicates (fixed at 100% - no wiggle room, no
+ * face detection - the fastest possible check, since it's often run first
+ * on a big folder with lots of subfolders). Step 2 is a second, deeper pass
+ * that groups photos from the same shooting session (burst shots) and marks
+ * the blurry ones within each group so both jobs happen at once. Step 3 is
+ * a final pass over every photo still in the folder before wrapping up,
+ * still marking blurry ones.
  */
-export type SortMode = 'duplicates' | 'blurry' | 'similar' | 'final';
+export type SortMode = 'duplicates' | 'similar' | 'final';
 
-export const SORT_STEP_ORDER: SortMode[] = ['duplicates', 'blurry', 'similar', 'final'];
+export const SORT_STEP_ORDER: SortMode[] = ['duplicates', 'similar', 'final'];
 
 export const SORT_STEPS: Record<
   SortMode,
@@ -28,24 +31,18 @@ export const SORT_STEPS: Record<
     // similarityDescription), never unrelated photos.
     defaultThreshold: 6,
   },
-  blurry: {
-    title: 'Étape 2 · Photos floues',
-    shortTitle: 'Étape 2',
-    description: 'Repère les photos qui semblent floues dans tout ton dossier, pour les trier facilement.',
-    defaultThreshold: 0,
-  },
   similar: {
-    title: 'Étape 3 · Meilleures photos d’une séance',
-    shortTitle: 'Étape 3',
+    title: 'Étape 2 · Photos similaires',
+    shortTitle: 'Étape 2',
     description:
-      "Regroupe les photos prises à la suite (même scène, plusieurs essais) pour t'aider à ne garder que les meilleures.",
+      "Regroupe les photos prises à la suite (même scène, plusieurs essais), grise celles qui semblent floues, pour t'aider à ne garder que les meilleures.",
     defaultThreshold: 12,
   },
   final: {
-    title: 'Étape 4 · Dernière vérification',
-    shortTitle: 'Étape 4',
+    title: 'Étape 3 · Dernière vérification',
+    shortTitle: 'Étape 3',
     description:
-      'Repasse en revue toutes les photos qui restent dans le dossier, une dernière fois avant de terminer.',
+      'Repasse en revue toutes les photos qui restent dans le dossier (les floues restent grisées), une dernière fois avant de terminer.',
     defaultThreshold: 0,
   },
 };
