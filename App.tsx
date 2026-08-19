@@ -275,7 +275,16 @@ export default function App() {
       analyzeFolder(lastFolderUri, newMode);
       return;
     }
-    const threshold = SORT_STEPS[newMode].defaultThreshold;
+    // "blurry" and "final" don't have their own grouping - they read the
+    // same groups "similar" already computed (to know which blurry photos
+    // have no group to compare against, and to keep marking each group's
+    // star correctly), so switching to either must never touch the
+    // threshold that produced those groups. Only "similar" itself (and
+    // "duplicates", a different part entirely) sets a fresh one.
+    const threshold =
+      newMode === 'similar' || newMode === 'duplicates'
+        ? SORT_STEPS[newMode].defaultThreshold
+        : similarityThreshold;
     setMode(newMode);
     setSimilarityThreshold(threshold);
     setSelected(new Set());

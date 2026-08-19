@@ -9,16 +9,18 @@ import type { HashedPhoto } from './perceptualHash';
  * Part "duplicates" is a single, deliberately minimal, fast pass that just
  * catches exact duplicates (fixed at 100% - no wiggle room, no face
  * detection) - useful on a big folder with lots of subfolders. Part
- * "sorting" is a second, deeper pass with two steps you can move between
+ * "sorting" is a second, deeper pass with three steps you can move between
  * freely: "similar" groups photos from the same shooting session (burst
  * shots) and marks the blurry ones within each group so both jobs happen at
- * once, and "final" is a last pass over every photo still in the folder,
+ * once, "blurry" is next with just the blurry photos that didn't land in
+ * any group (nothing to compare them against there, so they need their own
+ * pass), and "final" is a last pass over every photo still in the folder,
  * still marking blurry ones.
  */
-export type SortMode = 'duplicates' | 'similar' | 'final';
+export type SortMode = 'duplicates' | 'similar' | 'blurry' | 'final';
 export type SortPart = 'duplicates' | 'sorting';
 
-export const SORT_STEP_ORDER: SortMode[] = ['duplicates', 'similar', 'final'];
+export const SORT_STEP_ORDER: SortMode[] = ['duplicates', 'similar', 'blurry', 'final'];
 export const SORT_PART_ORDER: SortPart[] = ['duplicates', 'sorting'];
 
 export function partOf(mode: SortMode): SortPart {
@@ -27,7 +29,7 @@ export function partOf(mode: SortMode): SortPart {
 
 /** The steps belonging to the same part as `mode` - used for the step nav, so it never offers a cross-part jump. */
 export function partSteps(mode: SortMode): SortMode[] {
-  return partOf(mode) === 'duplicates' ? ['duplicates'] : ['similar', 'final'];
+  return partOf(mode) === 'duplicates' ? ['duplicates'] : ['similar', 'blurry', 'final'];
 }
 
 export const SORT_PARTS: Record<
@@ -43,7 +45,7 @@ export const SORT_PARTS: Record<
   sorting: {
     title: 'Tri des photos',
     description:
-      "Regroupe les photos d'une même séance, grise celles qui semblent floues, puis une dernière vérification de tout le dossier avant de terminer.",
+      "Regroupe les photos d'une même séance, repère les floues sans groupe, puis une dernière vérification de tout le dossier avant de terminer.",
     entryMode: 'similar',
   },
 };
@@ -73,6 +75,13 @@ export const SORT_STEPS: Record<
     // 25 -> 61%, Flavie's preferred starting point - the slider still moves
     // freely from there.
     defaultThreshold: 25,
+  },
+  blurry: {
+    title: 'Photos floues sans groupe',
+    shortTitle: 'Floues',
+    description:
+      "Les photos qui semblent floues mais n'ont pas de photo semblable à côté pour comparer - passe-les en revue une par une.",
+    defaultThreshold: 0,
   },
   final: {
     title: 'Dernière vérification',

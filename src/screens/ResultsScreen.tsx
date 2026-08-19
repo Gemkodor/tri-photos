@@ -119,6 +119,13 @@ export default function ResultsScreen({
     [allPhotos, groupByUri, sharpnessBaseline]
   );
   const blurryUris = useMemo(() => new Set(blurryPhotos.map((p) => p.uri)), [blurryPhotos]);
+  // The dedicated "blurry" step is only for photos with no group of their
+  // own to be judged against (isBlurryInGroup can't run for those at all) -
+  // grouped ones already get their chance to be reviewed in "similar".
+  const standaloneBlurryPhotos = useMemo(
+    () => blurryPhotos.filter((p) => !groupByUri.has(p.uri)),
+    [blurryPhotos, groupByUri]
+  );
 
   function isBlurry(photo: HashedPhoto): boolean {
     return isBlurryPhoto(photo, groupByUri.get(photo.uri) ?? null, sharpnessBaseline);
@@ -207,6 +214,11 @@ export default function ResultsScreen({
   const headerTitle = (() => {
     if (mode === 'final') {
       return `${allPhotos.length} photo${allPhotos.length > 1 ? 's' : ''} dans le dossier`;
+    }
+    if (mode === 'blurry') {
+      return standaloneBlurryPhotos.length === 0
+        ? 'Aucune photo floue sans groupe'
+        : `${standaloneBlurryPhotos.length} photo${standaloneBlurryPhotos.length > 1 ? 's' : ''} floue${standaloneBlurryPhotos.length > 1 ? 's' : ''} sans groupe`;
     }
     if (groups.length === 0) return 'Aucun doublon trouvé';
     const noun = mode === 'duplicates' ? 'identiques' : 'semblables';
@@ -392,6 +404,78 @@ export default function ResultsScreen({
                     </Pressable>
                     <Text style={styles.thumbSize} numberOfLines={1}>
                       {formatBytes(photo.sizeBytes)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </ScrollView>
+        )
+      ) : mode === 'blurry' ? (
+        standaloneBlurryPhotos.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>Aucune photo floue sans groupe repérée ! 🎉</Text>
+            {nextMode && (
+              <Pressable
+                onPress={() => onSwitchMode(nextMode)}
+                hitSlop={8}
+                style={styles.reviewAgainLink}
+              >
+                <Text style={styles.selectAllButtonText}>
+                  ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.list}>
+            <Text style={styles.instructions}>
+              Ces photos semblent floues mais n'ont pas de photo semblable à côté pour comparer.
+              Touche une photo pour la sélectionner à jeter, ou la loupe pour la voir en grand.
+            </Text>
+            <View style={styles.bulkActionsRow}>
+              <Pressable
+                style={styles.selectAllButton}
+                onPress={() => onSelectExceptBest(standaloneBlurryPhotos.map((p) => p.uri))}
+              >
+                <Text style={styles.selectAllButtonText}>🌫 Toutes les sélectionner</Text>
+              </Pressable>
+              {nextMode && (
+                <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
+                  <Text style={styles.selectAllButtonText}>
+                    ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+            <View style={styles.blurGrid}>
+              {standaloneBlurryPhotos.map((photo, index) => {
+                const isSelected = selected.has(photo.uri);
+                return (
+                  <Pressable
+                    key={photo.uri}
+                    style={styles.blurGridItem}
+                    onPress={() => onToggleSelect(photo.uri)}
+                  >
+                    <Image
+                      source={{ uri: photo.uri }}
+                      style={[styles.thumb, styles.thumbBlurry, isSelected && styles.thumbSelected]}
+                      contentFit="cover"
+                    />
+                    {isSelected && (
+                      <View style={styles.trashBadge}>
+                        <Text style={styles.trashBadgeText}>🗑</Text>
+                      </View>
+                    )}
+                    <Pressable
+                      style={styles.magnifyBadge}
+                      hitSlop={8}
+                      onPress={() => openFlatViewer(standaloneBlurryPhotos, index, 'Photos floues sans groupe')}
+                    >
+                      <Text style={styles.magnifyBadgeText}>🔍</Text>
+                    </Pressable>
+                    <Text style={styles.thumbSize} numberOfLines={1}>
+                      net. {Math.round(photo.sharpness)} ({photo.facesFound ? 'visage' : 'photo'})
                     </Text>
                   </Pressable>
                 );
@@ -625,7 +709,11 @@ export default function ResultsScreen({
       )}
 
       {!keepMode &&
-        (mode === 'final' ? allPhotos.length > 0 : groups.length > 0) && (
+        (mode === 'final'
+          ? allPhotos.length > 0
+          : mode === 'blurry'
+            ? standaloneBlurryPhotos.length > 0
+            : groups.length > 0) && (
           <View style={styles.bottomBar}>
             <Pressable
               style={[styles.deleteButton, selectedCount === 0 && styles.deleteButtonDisabled]}
