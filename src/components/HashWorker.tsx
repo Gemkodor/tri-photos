@@ -457,9 +457,14 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
     <WebView
       ref={webViewRef}
       originWhitelist={['*']}
+      // FACE_MODEL_DIR is built from FileSystem.cacheDirectory, which is
+      // already a full "file://..." URI (not a bare path) - prepending
+      // another "file://" here used to produce a doubled, broken URI
+      // (file://file:///...), which silently failed to resolve tf.min.js
+      // and blazeface.min.js against it.
       source={
         FACE_DETECTION_ENABLED
-          ? { html: ANALYZE_HTML, baseUrl: 'file://' + FACE_MODEL_DIR }
+          ? { html: ANALYZE_HTML, baseUrl: FACE_MODEL_DIR }
           : { html: ANALYZE_HTML }
       }
       allowFileAccess
