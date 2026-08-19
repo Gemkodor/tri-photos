@@ -258,6 +258,12 @@ ${
     };
     img.src = 'data:image/png;base64,' + base64;
   }
+
+  // The WebView's own onLoadEnd event is unreliable for source={{ html }}
+  // content on Android (a known react-native-webview issue - it can just
+  // never fire even though the page loaded fine) - so the page announces
+  // its own readiness instead of relying on that.
+  post({ ready: true });
   true;
 </script>
 </body>
@@ -346,12 +352,19 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
   function handleMessage(event: WebViewMessageEvent) {
     try {
       const payload = JSON.parse(event.nativeEvent.data) as {
-        id: number;
+        id?: number;
+        ready?: boolean;
         hash?: string;
         sharpness?: number;
         facesFound?: boolean;
         error?: string;
       };
+      if (payload.ready) {
+        setReady(true);
+        flushQueue();
+        return;
+      }
+      if (payload.id === undefined) return;
       const entry = pending.current.get(payload.id);
       if (!entry) return;
       pending.current.delete(payload.id);
