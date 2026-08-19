@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SORT_STEPS, SORT_STEP_ORDER, type SortMode } from '../lib/duplicateGroups';
+import { SORT_PART_ORDER, SORT_PARTS, type SortMode } from '../lib/duplicateGroups';
 import { colors } from '../theme';
 
 type Props = {
@@ -25,25 +25,29 @@ export default function HomeScreen({
       <View style={styles.hero}>
         <Text style={styles.title}>Tri Photos</Text>
         <Text style={styles.subtitle}>
-          Ton assistant de tri, étape par étape. Choisis une étape ci-dessous pour commencer.
+          Ton assistant de tri, en deux parties indépendantes. Choisis celle par laquelle
+          commencer.
         </Text>
       </View>
 
-      {SORT_STEP_ORDER.map((mode, index) => {
-        const step = SORT_STEPS[mode];
+      {SORT_PART_ORDER.map((part, index) => {
+        const info = SORT_PARTS[part];
         return (
-          <View key={mode} style={styles.stepCard}>
+          <View key={part} style={styles.stepCard}>
             <View style={styles.stepBadge}>
               <Text style={styles.stepBadgeText}>{index + 1}</Text>
             </View>
             <View style={styles.stepContent}>
-              <Text style={styles.stepTitle}>{step.title}</Text>
-              <Text style={styles.stepDescription}>{step.description}</Text>
-              <Pressable style={styles.stepButton} onPress={() => onPickFolder(mode)}>
+              <Text style={styles.stepTitle}>{info.title}</Text>
+              <Text style={styles.stepDescription}>{info.description}</Text>
+              <Pressable style={styles.stepButton} onPress={() => onPickFolder(info.entryMode)}>
                 <Text style={styles.stepButtonText}>Choisir un dossier</Text>
               </Pressable>
               {hasLastFolder && (
-                <Pressable style={styles.stepLink} onPress={() => onRescanLastFolder(mode)}>
+                <Pressable
+                  style={styles.stepLink}
+                  onPress={() => onRescanLastFolder(info.entryMode)}
+                >
                   <Text style={styles.stepLinkText}>Relancer sur le dernier dossier</Text>
                 </Pressable>
               )}

@@ -260,9 +260,11 @@ export default function App() {
   }
 
   function switchMode(newMode: SortMode) {
-    // The step being left has only ever computed a bare hash (no
-    // sharpness) - the target step needs sharpness, so the existing data
-    // isn't enough and a real rescan is needed rather than just switching.
+    // Defensive only: the UI now never offers a jump between the duplicates
+    // part and the sorting part (each has its own entry point on the home
+    // screen), so this shouldn't normally trigger - but if it ever did, a
+    // bare hash with no sharpness isn't enough for the sorting steps, so a
+    // real rescan is needed rather than switching onto incomplete data.
     if (newMode !== 'duplicates' && !hasSharpness && lastFolderUri) {
       analyzeFolder(lastFolderUri, newMode);
       return;

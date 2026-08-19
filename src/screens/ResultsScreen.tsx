@@ -18,10 +18,10 @@ import {
   groupKey,
   isBlurryPhoto,
   nextSortMode,
+  partSteps,
   percentToThreshold,
   similarityDescription,
   thresholdToPercent,
-  SORT_STEP_ORDER,
   SORT_STEPS,
   type DuplicateGroup,
   type SortMode,
@@ -98,6 +98,7 @@ export default function ResultsScreen({
 
   const selectedCount = selected.size;
   const hasGroups = mode === 'duplicates' || mode === 'similar';
+  const currentPartSteps = partSteps(mode);
 
   // Blur is judged two ways: relative to a photo's own group (catches a
   // blurry shot among otherwise-sharp near-duplicates) and relative to the
@@ -224,22 +225,27 @@ export default function ResultsScreen({
             </Pressable>
           )}
         </View>
-        <View style={styles.stepNav}>
-          {SORT_STEP_ORDER.map((stepMode) => {
-            const active = stepMode === mode;
-            return (
-              <Pressable
-                key={stepMode}
-                style={[styles.stepNavItem, active && styles.stepNavItemActive]}
-                onPress={() => !active && onSwitchMode(stepMode)}
-              >
-                <Text style={[styles.stepNavItemText, active && styles.stepNavItemTextActive]}>
-                  {SORT_STEPS[stepMode].shortTitle}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {currentPartSteps.length > 1 && (
+          <View style={styles.stepNav}>
+            {/* Only ever the steps within the current part - this never offers
+                a jump into the other part's analysis, which used to trigger a
+                confusing, silent re-analysis. */}
+            {currentPartSteps.map((stepMode) => {
+              const active = stepMode === mode;
+              return (
+                <Pressable
+                  key={stepMode}
+                  style={[styles.stepNavItem, active && styles.stepNavItemActive]}
+                  onPress={() => !active && onSwitchMode(stepMode)}
+                >
+                  <Text style={[styles.stepNavItemText, active && styles.stepNavItemTextActive]}>
+                    {SORT_STEPS[stepMode].shortTitle}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
         <Text style={styles.headerTitle}>{headerTitle}</Text>
         {hasGroups && (
           <Text style={styles.closestPairHint}>

@@ -1,26 +1,60 @@
 import type { HashedPhoto } from './perceptualHash';
 
 /**
- * The sorting path: step 1 is its own, separate, deliberately simple pass
- * that just catches exact duplicates (fixed at 100% - no wiggle room, no
- * face detection - the fastest possible check, since it's often run first
- * on a big folder with lots of subfolders). Step 2 is a second, deeper pass
- * that groups photos from the same shooting session (burst shots) and marks
- * the blurry ones within each group so both jobs happen at once. Step 3 is
- * a final pass over every photo still in the folder before wrapping up,
+ * The app is two entirely separate parts, each with its own analysis - on
+ * purpose: crossing between them used to silently trigger a second, deeper
+ * re-analysis of the same folder, which was confusing. Now the only way
+ * from one to the other is back through the home screen.
+ *
+ * Part "duplicates" is a single, deliberately minimal, fast pass that just
+ * catches exact duplicates (fixed at 100% - no wiggle room, no face
+ * detection) - useful on a big folder with lots of subfolders. Part
+ * "sorting" is a second, deeper pass with two steps you can move between
+ * freely: "similar" groups photos from the same shooting session (burst
+ * shots) and marks the blurry ones within each group so both jobs happen at
+ * once, and "final" is a last pass over every photo still in the folder,
  * still marking blurry ones.
  */
 export type SortMode = 'duplicates' | 'similar' | 'final';
+export type SortPart = 'duplicates' | 'sorting';
 
 export const SORT_STEP_ORDER: SortMode[] = ['duplicates', 'similar', 'final'];
+export const SORT_PART_ORDER: SortPart[] = ['duplicates', 'sorting'];
+
+export function partOf(mode: SortMode): SortPart {
+  return mode === 'duplicates' ? 'duplicates' : 'sorting';
+}
+
+/** The steps belonging to the same part as `mode` - used for the step nav, so it never offers a cross-part jump. */
+export function partSteps(mode: SortMode): SortMode[] {
+  return partOf(mode) === 'duplicates' ? ['duplicates'] : ['similar', 'final'];
+}
+
+export const SORT_PARTS: Record<
+  SortPart,
+  { title: string; description: string; entryMode: SortMode }
+> = {
+  duplicates: {
+    title: 'Recherche de doublons',
+    description:
+      'Repère les copies quasi parfaitement identiques de la même photo, pour un premier grand ménage rapide.',
+    entryMode: 'duplicates',
+  },
+  sorting: {
+    title: 'Tri des photos',
+    description:
+      "Regroupe les photos d'une même séance, grise celles qui semblent floues, puis une dernière vérification de tout le dossier avant de terminer.",
+    entryMode: 'similar',
+  },
+};
 
 export const SORT_STEPS: Record<
   SortMode,
   { title: string; shortTitle: string; description: string; defaultThreshold: number }
 > = {
   duplicates: {
-    title: 'Étape 1 · Doublons exacts',
-    shortTitle: 'Étape 1',
+    title: 'Doublons exacts',
+    shortTitle: 'Doublons',
     description:
       'Repère les copies quasi parfaitement identiques de la même photo, pour un premier grand ménage rapide.',
     // Even a real copier-coller of the same file can decode to slightly
@@ -32,25 +66,26 @@ export const SORT_STEPS: Record<
     defaultThreshold: 6,
   },
   similar: {
-    title: 'Étape 2 · Photos similaires',
-    shortTitle: 'Étape 2',
+    title: 'Photos similaires',
+    shortTitle: 'Similaires',
     description:
       "Regroupe les photos prises à la suite (même scène, plusieurs essais), grise celles qui semblent floues, pour t'aider à ne garder que les meilleures.",
     defaultThreshold: 12,
   },
   final: {
-    title: 'Étape 3 · Dernière vérification',
-    shortTitle: 'Étape 3',
+    title: 'Dernière vérification',
+    shortTitle: 'Vérification',
     description:
       'Repasse en revue toutes les photos qui restent dans le dossier (les floues restent grisées), une dernière fois avant de terminer.',
     defaultThreshold: 0,
   },
 };
 
-/** The next step in the path, or null once at the end - used for "passer à l'étape suivante". */
+/** The next step within the same part, or null once at the end - used for "passer à l'étape suivante". Never crosses into the other part. */
 export function nextSortMode(mode: SortMode): SortMode | null {
-  const index = SORT_STEP_ORDER.indexOf(mode);
-  return index >= 0 && index < SORT_STEP_ORDER.length - 1 ? SORT_STEP_ORDER[index + 1] : null;
+  const steps = partSteps(mode);
+  const index = steps.indexOf(mode);
+  return index >= 0 && index < steps.length - 1 ? steps[index + 1] : null;
 }
 
 /**
