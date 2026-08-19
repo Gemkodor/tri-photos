@@ -313,8 +313,17 @@ const REQUEST_TIMEOUT_MS = 25000;
 
 const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
   const webViewRef = useRef<WebView>(null);
-  const [ready, setReady] = useState(false);
   const [assetsReady, setAssetsReady] = useState(false);
+  // A ref, not state: flushQueue and the timeout handler below both need
+  // the *current* value the instant the "ready" message arrives, but a
+  // function defined during an earlier render only ever sees the `ready`
+  // state as it was at that render - calling setReady(true) doesn't change
+  // what an already-created closure reads. That mismatch meant the very
+  // first photo's job could be queued, "ready" could arrive right after,
+  // and flushQueue (called from that same stale closure) would still see
+  // ready=false and never actually send it - a guaranteed timeout on every
+  // single scan. A ref's .current is always the latest value, closure or not.
+  const readyRef = useRef(false);
   const pending = useRef<Map<number, PendingEntry>>(new Map());
   const nextId = useRef(0);
   const queue = useRef<Array<{ id: number; base64: string; needSharpness: boolean }>>([]);
@@ -340,7 +349,7 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
   }, []);
 
   function flushQueue() {
-    if (!ready) return;
+    if (!readyRef.current) return;
     const jobs = queue.current;
     queue.current = [];
     for (const job of jobs) {
@@ -357,7 +366,8 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
       return new Promise<PhotoMetrics>((resolve, reject) => {
         const timeout = setTimeout(() => {
           pending.current.delete(id);
-          const reason = diagnosis.current ?? (ready ? 'page chargée mais muette' : 'page jamais chargée');
+          const reason =
+            diagnosis.current ?? (readyRef.current ? 'page chargée mais muette' : 'page jamais chargée');
           reject(new Error(`hash_timeout (${reason})`));
         }, REQUEST_TIMEOUT_MS);
         pending.current.set(id, { resolve, reject, timeout });
@@ -378,7 +388,7 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
         error?: string;
       };
       if (payload.ready) {
-        setReady(true);
+        readyRef.current = true;
         flushQueue();
         return;
       }
@@ -416,7 +426,7 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
       allowFileAccessFromFileURLs
       allowUniversalAccessFromFileURLs
       onLoadEnd={() => {
-        setReady(true);
+        readyRef.current = true;
         flushQueue();
       }}
       onError={(e) => {
@@ -427,7 +437,7 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
       }}
       onRenderProcessGone={(e) => {
         diagnosis.current = `page fermée par le téléphone (didCrash: ${e.nativeEvent.didCrash})`;
-        setReady(false);
+        readyRef.current = false;
       }}
       onMessage={handleMessage}
       javaScriptEnabled
