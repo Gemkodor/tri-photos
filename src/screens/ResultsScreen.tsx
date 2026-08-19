@@ -50,6 +50,8 @@ type Props = {
   onOpenTrash: () => void;
   onSwitchMode: (mode: SortMode) => void;
   onFinishSorting: () => void;
+  /** Debug: why face detection did or didn't come up during the last scan. */
+  faceModelDiagnostic: string | null;
 };
 
 type FlatViewer = { photos: HashedPhoto[]; index: number; title: string };
@@ -74,6 +76,7 @@ export default function ResultsScreen({
   onOpenTrash,
   onSwitchMode,
   onFinishSorting,
+  faceModelDiagnostic,
 }: Props) {
   const [viewerGroupIndex, setViewerGroupIndex] = useState<number | null>(null);
   const [viewerPhotoIndex, setViewerPhotoIndex] = useState(0);
@@ -257,6 +260,16 @@ export default function ResultsScreen({
           <Text style={styles.closestPairHint}>
             Les 2 photos les plus proches : {closestPair.a.name} et {closestPair.b.name} (
             {thresholdToPercent(closestPair.distance)}% pareilles)
+          </Text>
+        )}
+        {mode !== 'duplicates' && (
+          <Text style={styles.closestPairHint}>
+            Reconnaissance de visages :{' '}
+            {faceModelDiagnostic === null
+              ? 'en cours...'
+              : faceModelDiagnostic === 'ok'
+                ? 'ok'
+                : `échec (${faceModelDiagnostic})`}
           </Text>
         )}
         {hasGroups && reviewedCount > 0 && (

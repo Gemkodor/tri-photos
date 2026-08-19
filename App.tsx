@@ -54,6 +54,10 @@ export default function App() {
   // can't be reused for the similar/final steps, which do need it. Tracks
   // whether a real rescan is needed when moving to one of those.
   const [hasSharpness, setHasSharpness] = useState(true);
+  // Debug-only: why face detection did or didn't come up during the last
+  // scan, shown on the results screen so this can be checked without ever
+  // needing to look at logs.
+  const [faceModelDiagnostic, setFaceModelDiagnostic] = useState<string | null>(null);
   const [mode, setMode] = useState<SortMode>('duplicates');
   const [similarityThreshold, setSimilarityThreshold] = useState(
     SORT_STEPS.duplicates.defaultThreshold
@@ -142,6 +146,7 @@ export default function App() {
       }
 
       await stopScanningService();
+      setFaceModelDiagnostic(worker.getFaceModelDiagnostic());
 
       // Every single photo failed to analyse - rather than silently landing
       // on an empty, confusing results screen, show why so it isn't a
@@ -525,6 +530,7 @@ export default function App() {
             onOpenTrash={() => setScreen('trash')}
             onSwitchMode={switchMode}
             onFinishSorting={handleFinishSorting}
+            faceModelDiagnostic={faceModelDiagnostic}
           />
         )}
 

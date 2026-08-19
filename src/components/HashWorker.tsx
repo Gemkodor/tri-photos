@@ -112,13 +112,26 @@ ${
     FACE_DETECTION_ENABLED
       ? `(function loadFaceModel() {
     try {
+      if (typeof tf === 'undefined') {
+        post({ faceModelStatus: 'failed', faceModelError: 'tf.min.js pas chargé (typeof tf === undefined)' });
+        faceModelFailed = true;
+        return;
+      }
+      if (typeof blazeface === 'undefined') {
+        post({ faceModelStatus: 'failed', faceModelError: 'blazeface.min.js pas chargé (typeof blazeface === undefined)' });
+        faceModelFailed = true;
+        return;
+      }
       blazeface.load({ modelUrl: 'model.json' }).then(function (model) {
         faceModel = model;
-      }).catch(function () {
+        post({ faceModelStatus: 'ok' });
+      }).catch(function (e) {
         faceModelFailed = true;
+        post({ faceModelStatus: 'failed', faceModelError: 'blazeface.load a échoué : ' + String(e) });
       });
     } catch (e) {
       faceModelFailed = true;
+      post({ faceModelStatus: 'failed', faceModelError: 'exception : ' + String(e) });
     }
   })();`
       : 'faceModelFailed = true;'
@@ -321,6 +334,8 @@ export type HashWorkerHandle = {
     base64Png: string,
     options?: { needSharpness?: boolean }
   ) => Promise<PhotoMetrics>;
+  /** Why face detection did or didn't come up during this scan, for on-screen debugging. */
+  getFaceModelDiagnostic: () => string | null;
 };
 
 const REQUEST_TIMEOUT_MS = 25000;
@@ -346,6 +361,7 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
   // loaded fine but never answered" are very different problems to chase,
   // and a bare "hash_timeout" can't tell them apart.
   const diagnosis = useRef<string | null>(null);
+  const faceModelDiagnostic = useRef<string | null>(FACE_DETECTION_ENABLED ? null : 'désactivée');
 
   useEffect(() => {
     let cancelled = false;
@@ -389,6 +405,9 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
         flushQueue();
       });
     },
+    getFaceModelDiagnostic() {
+      return faceModelDiagnostic.current;
+    },
   }));
 
   function handleMessage(event: WebViewMessageEvent) {
@@ -400,10 +419,17 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
         sharpness?: number;
         facesFound?: boolean;
         error?: string;
+        faceModelStatus?: 'ok' | 'failed';
+        faceModelError?: string;
       };
       if (payload.ready) {
         readyRef.current = true;
         flushQueue();
+        return;
+      }
+      if (payload.faceModelStatus) {
+        faceModelDiagnostic.current =
+          payload.faceModelStatus === 'ok' ? 'ok' : (payload.faceModelError ?? 'échec inconnu');
         return;
       }
       if (payload.id === undefined) return;
