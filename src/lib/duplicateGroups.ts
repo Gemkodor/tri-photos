@@ -255,27 +255,41 @@ const SHARPNESS_RATIO_THRESHOLD = 1.4;
  * blurry shot next to a sharp one); otherwise falls back to file size, which
  * is a decent proxy for resolution/quality when sharpness is a wash.
  */
+// A sharpness score measured on just a face crop and one measured on a whole
+// photo aren't on the same scale - a tight face crop naturally has less
+// texture/edges than a full scene, even in perfect focus, so its Laplacian
+// variance reads much lower. Comparing the two directly made faces look
+// blurry next to sharp backgrounds and vice versa (confirmed by Flavie's
+// own numbers: a 3160 "whole photo" reading judged sharper than a 1804
+// "face" reading that actually looked sharper to her). Every sharpness
+// comparison below only ever compares photos measured the same way.
+function sameMeasurement(a: HashedPhoto, b: HashedPhoto): boolean {
+  return a.facesFound === b.facesFound;
+}
+
 function bestPhotoFirst(a: HashedPhoto, b: HashedPhoto): number {
   const sharpA = a.sharpness || 0;
   const sharpB = b.sharpness || 0;
   const higher = Math.max(sharpA, sharpB);
   const lower = Math.min(sharpA, sharpB);
-  if (lower > 0 && higher / lower >= SHARPNESS_RATIO_THRESHOLD) {
+  if (sameMeasurement(a, b) && lower > 0 && higher / lower >= SHARPNESS_RATIO_THRESHOLD) {
     return sharpB - sharpA;
   }
   return (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0);
 }
 
 /**
- * A photo is flagged as "blurry" when it's softer than the sharpest photo in
- * its own group. This uses a more sensitive ratio than the star pick - we'd
- * rather flag a borderline photo for the user to glance at than miss a real
- * one, whereas the star should only move for a clear-cut winner.
+ * A photo is flagged as "blurry" when it's softer than the sharpest
+ * same-measurement photo in its own group. This uses a more sensitive ratio
+ * than the star pick - we'd rather flag a borderline photo for the user to
+ * glance at than miss a real one, whereas the star should only move for a
+ * clear-cut winner.
  */
 const BLUR_FLAG_RATIO = 1.15;
 
 export function isBlurryInGroup(photo: HashedPhoto, group: DuplicateGroup): boolean {
-  const groupBestSharpness = Math.max(0, ...group.photos.map((p) => p.sharpness || 0));
+  const comparable = group.photos.filter((p) => sameMeasurement(p, photo));
+  const groupBestSharpness = Math.max(0, ...comparable.map((p) => p.sharpness || 0));
   const photoSharpness = photo.sharpness || 0;
   if (groupBestSharpness <= 0 || photoSharpness <= 0) return false;
   return groupBestSharpness / photoSharpness >= BLUR_FLAG_RATIO;
@@ -284,39 +298,48 @@ export function isBlurryInGroup(photo: HashedPhoto, group: DuplicateGroup): bool
 /** A photo is flagged blurry if it falls below this fraction of the scan's reference sharpness. */
 const BLUR_BASELINE_RATIO = 0.7;
 
+export type SharpnessBaseline = { whole: number; face: number };
+
 /**
  * The reference sharpness for this batch of photos, used to flag photos with
- * no group to compare against. Uses the 80th percentile rather than the
- * median - the median is dragged down by ordinary variation in subject
- * matter (a plain sky is "softer" than a detailed scene even in perfect
- * focus), so comparing to "how sharp the average photo is" misses real blur.
- * The 80th percentile is a closer stand-in for "how sharp a good, in-focus
- * photo from this scan looks", which is the actual question being asked.
+ * no group to compare against - computed separately for face-measured and
+ * whole-image-measured photos (see sameMeasurement above), since the two
+ * aren't on the same scale. Uses the 80th percentile rather than the median
+ * - the median is dragged down by ordinary variation in subject matter (a
+ * plain sky is "softer" than a detailed scene even in perfect focus), so
+ * comparing to "how sharp the average photo is" misses real blur. The 80th
+ * percentile is a closer stand-in for "how sharp a good, in-focus photo from
+ * this scan looks", which is the actual question being asked.
  */
-export function computeSharpnessBaseline(photos: HashedPhoto[]): number {
-  const values = photos.map((p) => p.sharpness || 0).filter((s) => s > 0);
-  if (values.length === 0) return 0;
-  values.sort((a, b) => a - b);
-  const idx = Math.min(values.length - 1, Math.floor(values.length * 0.8));
-  return values[idx];
+export function computeSharpnessBaseline(photos: HashedPhoto[]): SharpnessBaseline {
+  function percentile80(values: number[]): number {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.8));
+    return sorted[idx];
+  }
+  const whole = photos.filter((p) => !p.facesFound).map((p) => p.sharpness || 0).filter((s) => s > 0);
+  const face = photos.filter((p) => p.facesFound).map((p) => p.sharpness || 0).filter((s) => s > 0);
+  return { whole: percentile80(whole), face: percentile80(face) };
 }
 
 /**
  * Whole-scan blur check: flags a photo whether or not it belongs to a group,
- * by combining two signals - clearly softer than its own group's best (more
- * sensitive, same-scene comparison), or clearly softer than the scan's
- * typical sharpness (catches a lone blurry photo with nothing similar to
- * compare it against).
+ * by combining two signals - clearly softer than its own group's
+ * same-measurement best (more sensitive, same-scene comparison), or clearly
+ * softer than the scan's typical sharpness for its own measurement type
+ * (catches a lone blurry photo with nothing similar to compare it against).
  */
 export function isBlurryPhoto(
   photo: HashedPhoto,
   group: DuplicateGroup | null,
-  sharpnessBaseline: number
+  sharpnessBaseline: SharpnessBaseline
 ): boolean {
   const photoSharpness = photo.sharpness || 0;
   if (photoSharpness <= 0) return false;
   if (group && isBlurryInGroup(photo, group)) return true;
-  if (sharpnessBaseline > 0 && photoSharpness < sharpnessBaseline * BLUR_BASELINE_RATIO) {
+  const baseline = photo.facesFound ? sharpnessBaseline.face : sharpnessBaseline.whole;
+  if (baseline > 0 && photoSharpness < baseline * BLUR_BASELINE_RATIO) {
     return true;
   }
   return false;
@@ -325,7 +348,8 @@ export function isBlurryPhoto(
 /** Explains, for display, why the first photo in a group got the star. */
 export function bestPhotoReason(group: DuplicateGroup): string {
   const [best, ...rest] = group.photos;
-  const runnerUpSharpness = Math.max(0, ...rest.map((p) => p.sharpness || 0));
+  const comparableRest = rest.filter((p) => sameMeasurement(p, best));
+  const runnerUpSharpness = Math.max(0, ...comparableRest.map((p) => p.sharpness || 0));
   const bestSharpness = best.sharpness || 0;
   if (runnerUpSharpness > 0 && bestSharpness / runnerUpSharpness >= SHARPNESS_RATIO_THRESHOLD) {
     return best.facesFound
