@@ -30,7 +30,14 @@ const FACE_MODEL_DIR = (FileSystem.cacheDirectory ?? '') + 'facemodel/';
  * not just face detection. Loading them as files the WebView reads off disk
  * itself has no such limit.
  */
-const FACE_MODEL_FILES = ['tf.min.js', 'blazeface.min.js', 'model.json', 'group1-shard1of1.bin'];
+// Only the JS libraries are written as files - loading them via <script
+// src> works fine against a local file:// baseUrl. The model itself
+// (topology + weights, embedded inline further below via tf.io.fromMemory)
+// is NOT written as a file: tf.js's normal model loading uses fetch()
+// internally, and fetch() to a local file:// URL fails on Android WebView
+// ("TypeError: Failed to fetch") even with file access otherwise enabled -
+// a different, stricter code path than <script src>'s resource loading.
+const FACE_MODEL_FILES = ['tf.min.js', 'blazeface.min.js'];
 
 async function ensureFaceModelFiles(): Promise<void> {
   if (!FACE_DETECTION_ENABLED) return;
@@ -52,10 +59,6 @@ async function ensureFaceModelFiles(): Promise<void> {
   await Promise.all([
     FileSystem.writeAsStringAsync(FACE_MODEL_DIR + 'tf.min.js', TF_JS_SOURCE),
     FileSystem.writeAsStringAsync(FACE_MODEL_DIR + 'blazeface.min.js', BLAZEFACE_JS_SOURCE),
-    FileSystem.writeAsStringAsync(FACE_MODEL_DIR + 'model.json', JSON.stringify(BLAZEFACE_MODEL_JSON)),
-    FileSystem.writeAsStringAsync(FACE_MODEL_DIR + 'group1-shard1of1.bin', BLAZEFACE_WEIGHTS_BASE64, {
-      encoding: FileSystem.EncodingType.Base64,
-    }),
   ]);
 }
 
@@ -110,7 +113,21 @@ ${
   var faceModelFailed = false;
   ${
     FACE_DETECTION_ENABLED
-      ? `(function loadFaceModel() {
+      ? `// The model itself (topology + weights) is embedded inline here and
+  // loaded via tf.io.fromMemory - not fetched from a file, since fetch()
+  // to a local file:// URL fails on Android WebView (confirmed: "Failed to
+  // fetch") even though <script src> to the same kind of URL works fine.
+  var BLAZEFACE_MODEL_JSON = ${JSON.stringify(BLAZEFACE_MODEL_JSON)};
+  var BLAZEFACE_WEIGHTS_BASE64 = ${JSON.stringify(BLAZEFACE_WEIGHTS_BASE64)};
+
+  function base64ToArrayBuffer(base64) {
+    var binary = atob(base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  (function loadFaceModel() {
     try {
       if (typeof tf === 'undefined') {
         post({ faceModelStatus: 'failed', faceModelError: 'tf.min.js pas chargé (typeof tf === undefined)' });
@@ -122,7 +139,15 @@ ${
         faceModelFailed = true;
         return;
       }
-      blazeface.load({ modelUrl: 'model.json' }).then(function (model) {
+      var handler = tf.io.fromMemory({
+        modelTopology: BLAZEFACE_MODEL_JSON.modelTopology,
+        weightSpecs: BLAZEFACE_MODEL_JSON.weightsManifest[0].weights,
+        weightData: base64ToArrayBuffer(BLAZEFACE_WEIGHTS_BASE64),
+        format: BLAZEFACE_MODEL_JSON.format,
+        generatedBy: BLAZEFACE_MODEL_JSON.generatedBy,
+        convertedBy: BLAZEFACE_MODEL_JSON.convertedBy,
+      });
+      blazeface.load({ modelUrl: handler }).then(function (model) {
         faceModel = model;
         post({ faceModelStatus: 'ok' });
       }).catch(function (e) {
