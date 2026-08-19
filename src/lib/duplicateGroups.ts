@@ -280,12 +280,12 @@ function bestPhotoFirst(a: HashedPhoto, b: HashedPhoto): number {
 
 /**
  * A photo is flagged as "blurry" when it's softer than the sharpest
- * same-measurement photo in its own group. This uses a more sensitive ratio
- * than the star pick - we'd rather flag a borderline photo for the user to
- * glance at than miss a real one, whereas the star should only move for a
- * clear-cut winner.
+ * same-measurement photo in its own group. Flavie found 1.15 (only 15%
+ * softer than the group's best) too sensitive - a photo she didn't think
+ * looked blurry at all was getting flagged just for being a bit behind a
+ * sharper sibling. Loosened so only a clearer gap gets flagged.
  */
-const BLUR_FLAG_RATIO = 1.15;
+const BLUR_FLAG_RATIO = 1.3;
 
 export function isBlurryInGroup(photo: HashedPhoto, group: DuplicateGroup): boolean {
   const comparable = group.photos.filter((p) => sameMeasurement(p, photo));
