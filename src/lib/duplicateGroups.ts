@@ -329,6 +329,12 @@ export function computeSharpnessBaseline(photos: HashedPhoto[]): SharpnessBaseli
  * same-measurement best (more sensitive, same-scene comparison), or clearly
  * softer than the scan's typical sharpness for its own measurement type
  * (catches a lone blurry photo with nothing similar to compare it against).
+ *
+ * Never flags the group's own star (its photos[0], the one the app itself
+ * is suggesting to keep) - "this is the best one, also it's blurry" is a
+ * contradiction that only undermines the recommendation (confirmed by
+ * Flavie: a starred photo was being flagged blurry while sitting right next
+ * to a photo that looked blurrier to her but wasn't flagged at all).
  */
 export function isBlurryPhoto(
   photo: HashedPhoto,
@@ -337,6 +343,7 @@ export function isBlurryPhoto(
 ): boolean {
   const photoSharpness = photo.sharpness || 0;
   if (photoSharpness <= 0) return false;
+  if (group && group.photos[0] === photo) return false;
   if (group && isBlurryInGroup(photo, group)) return true;
   const baseline = photo.facesFound ? sharpnessBaseline.face : sharpnessBaseline.whole;
   if (baseline > 0 && photoSharpness < baseline * BLUR_BASELINE_RATIO) {
