@@ -158,12 +158,19 @@ async function getSetAsideFolderUri(rootUri: string): Promise<string> {
   return created;
 }
 
+/** Thrown instead of a generic error when the app's own copy of the photo is gone - nothing left to move or restore. */
+class MissingSourceError extends Error {}
+
 /**
  * Moves one corbeille entry's bytes into a real, user-visible folder, then
  * removes the app-private copy. Never deletes the photo itself - worst case
  * it just sits in that folder.
  */
 async function relocateEntryToFolder(entry: TrashEntry, folderUri: string): Promise<void> {
+  const info = await FileSystem.getInfoAsync(entry.uri);
+  if (!info.exists) {
+    throw new MissingSourceError();
+  }
   const { base, mime } = splitNameAndExtension(entry.originalName);
   const newFileUri = await StorageAccessFramework.createFileAsync(folderUri, base, mime);
   const content = await FileSystem.readAsStringAsync(entry.uri, { encoding: 'base64' });
@@ -174,66 +181,92 @@ async function relocateEntryToFolder(entry: TrashEntry, folderUri: string): Prom
 /**
  * Relocates corbeille entries using `resolveFolderUri` to decide each one's
  * destination (either the fixed "De côté" folder, or a restore's per-entry
- * original sub-folder). Entries that fail to move stay in the corbeille
- * rather than being dropped, so a partial failure never loses a photo.
- * `filterId` limits this to a single entry.
+ * original sub-folder). Entries that fail to move for a fixable reason
+ * (permissions, a busy file...) stay in the corbeille rather than being
+ * dropped, so a partial failure never loses a photo - but an entry whose own
+ * app-private copy has genuinely disappeared (e.g. the app's storage was
+ * cleared while it was sitting there) can never succeed no matter how many
+ * times it's retried, so it's dropped instead of staying stuck forever;
+ * `missingCount` reports how many so the caller can say so honestly rather
+ * than a generic "try again". `filterId` limits this to a single entry.
  */
 async function relocateAll(
   resolveFolderUri: (entry: TrashEntry) => Promise<string>,
   filterId?: string
-): Promise<{ movedCount: number }> {
+): Promise<{ movedCount: number; missingCount: number }> {
   const entries = await readManifest();
   const toMove = filterId ? entries.filter((e) => e.id === filterId) : entries;
   const untouched = filterId ? entries.filter((e) => e.id !== filterId) : [];
 
   const remaining: TrashEntry[] = [...untouched];
   let movedCount = 0;
+  let missingCount = 0;
   for (const entry of toMove) {
     try {
       const folderUri = await resolveFolderUri(entry);
       await relocateEntryToFolder(entry, folderUri);
       movedCount += 1;
-    } catch {
-      remaining.push(entry);
+    } catch (e) {
+      if (e instanceof MissingSourceError) {
+        missingCount += 1;
+      } else {
+        remaining.push(entry);
+      }
     }
   }
   await writeManifest(remaining);
-  return { movedCount };
+  return { movedCount, missingCount };
 }
 
 /**
  * Moves a single corbeille photo into "De côté". Returns false (leaving the
- * entry in the corbeille) if the move failed, so nothing is ever silently lost.
+ * entry in the corbeille) if the move failed for a fixable reason, or 'missing'
+ * if the app's own copy was already gone (the entry was dropped, nothing to retry).
  */
-export async function moveOneToSetAside(entryId: string, rootUri: string): Promise<boolean> {
+export async function moveOneToSetAside(
+  entryId: string,
+  rootUri: string
+): Promise<'moved' | 'missing' | 'failed'> {
   const setAsideFolderUri = await getSetAsideFolderUri(rootUri);
-  const { movedCount } = await relocateAll(async () => setAsideFolderUri, entryId);
-  return movedCount > 0;
+  const { movedCount, missingCount } = await relocateAll(async () => setAsideFolderUri, entryId);
+  if (movedCount > 0) return 'moved';
+  if (missingCount > 0) return 'missing';
+  return 'failed';
 }
 
 /** Moves every corbeille photo into "De côté". */
-export async function moveAllToSetAside(rootUri: string): Promise<{ movedCount: number }> {
+export async function moveAllToSetAside(
+  rootUri: string
+): Promise<{ movedCount: number; missingCount: number }> {
   const setAsideFolderUri = await getSetAsideFolderUri(rootUri);
   return relocateAll(async () => setAsideFolderUri);
 }
 
 /**
  * Puts a single corbeille photo back into the exact sub-folder it was jeté
- * from (recreating that sub-folder if it no longer exists).
+ * from (recreating that sub-folder if it no longer exists). Returns 'missing'
+ * if the app's own copy was already gone (the entry was dropped, nothing to retry).
  */
-export async function restoreOne(entryId: string, rootUri: string): Promise<boolean> {
-  const { movedCount } = await relocateAll(
+export async function restoreOne(
+  entryId: string,
+  rootUri: string
+): Promise<'moved' | 'missing' | 'failed'> {
+  const { movedCount, missingCount } = await relocateAll(
     (entry) => getOrCreateSubfolder(rootUri, entry.folderPath),
     entryId
   );
-  return movedCount > 0;
+  if (movedCount > 0) return 'moved';
+  if (missingCount > 0) return 'missing';
+  return 'failed';
 }
 
 /**
  * Puts every corbeille photo back into its original sub-folder. Entries
  * sharing the same sub-folder reuse the same lookup instead of repeating it.
  */
-export async function restoreAll(rootUri: string): Promise<{ movedCount: number }> {
+export async function restoreAll(
+  rootUri: string
+): Promise<{ movedCount: number; missingCount: number }> {
   const folderCache = new Map<string, Promise<string>>();
   function resolve(entry: TrashEntry): Promise<string> {
     let cached = folderCache.get(entry.folderPath);

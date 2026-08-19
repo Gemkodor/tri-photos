@@ -376,14 +376,19 @@ export default function App() {
     );
   }
 
+  const MISSING_SOURCE_MESSAGE =
+    "Le fichier que l'appli avait mis de côté pour cette photo a disparu (par exemple si l'appli a été réinstallée entre-temps) - il n'y avait donc plus rien à ranger ni à restaurer, et elle a été retirée de la corbeille.";
+
   async function handleSetAsideOne(id: string) {
     if (!lastFolderUri) {
       Alert.alert('Un souci est survenu', "Je ne sais pas dans quel dossier ranger cette photo.");
       return;
     }
-    const ok = await moveOneToSetAside(id, lastFolderUri);
+    const result = await moveOneToSetAside(id, lastFolderUri);
     await refreshTrash();
-    if (!ok) {
+    if (result === 'missing') {
+      Alert.alert('Photo introuvable', MISSING_SOURCE_MESSAGE);
+    } else if (result === 'failed') {
       Alert.alert('Un souci est survenu', "Je n'ai pas réussi à ranger cette photo. Réessaie.");
     }
   }
@@ -394,12 +399,21 @@ export default function App() {
       return;
     }
     const before = trashEntries.length;
-    const { movedCount } = await moveAllToSetAside(lastFolderUri);
+    const { movedCount, missingCount } = await moveAllToSetAside(lastFolderUri);
     await refreshTrash();
-    if (movedCount < before) {
+    const stillStuck = before - movedCount - missingCount;
+    if (missingCount > 0) {
+      Alert.alert(
+        'Certaines photos étaient introuvables',
+        `${missingCount} photo${missingCount > 1 ? 's' : ''} n'avaient plus de fichier retrouvable et ${missingCount > 1 ? 'ont' : 'a'} été retirée${missingCount > 1 ? 's' : ''} de la corbeille.` +
+          (stillStuck > 0
+            ? ` ${stillStuck} autre${stillStuck > 1 ? 's' : ''} n'ont pas pu être rangée${stillStuck > 1 ? 's' : ''} et restent dans la corbeille. Réessaie.`
+            : '')
+      );
+    } else if (stillStuck > 0) {
       Alert.alert(
         'Un souci est survenu',
-        `${before - movedCount} sur ${before} n'ont pas pu être rangées et restent dans la corbeille. Réessaie.`
+        `${stillStuck} sur ${before} n'ont pas pu être rangées et restent dans la corbeille. Réessaie.`
       );
     }
   }
@@ -409,9 +423,11 @@ export default function App() {
       Alert.alert('Un souci est survenu', "Je ne sais pas dans quel dossier restaurer cette photo.");
       return;
     }
-    const ok = await restoreOne(id, lastFolderUri);
+    const result = await restoreOne(id, lastFolderUri);
     await refreshTrash();
-    if (!ok) {
+    if (result === 'missing') {
+      Alert.alert('Photo introuvable', MISSING_SOURCE_MESSAGE);
+    } else if (result === 'failed') {
       Alert.alert('Un souci est survenu', "Je n'ai pas réussi à restaurer cette photo. Réessaie.");
     }
   }
@@ -422,12 +438,21 @@ export default function App() {
       return;
     }
     const before = trashEntries.length;
-    const { movedCount } = await restoreAll(lastFolderUri);
+    const { movedCount, missingCount } = await restoreAll(lastFolderUri);
     await refreshTrash();
-    if (movedCount < before) {
+    const stillStuck = before - movedCount - missingCount;
+    if (missingCount > 0) {
+      Alert.alert(
+        'Certaines photos étaient introuvables',
+        `${missingCount} photo${missingCount > 1 ? 's' : ''} n'avaient plus de fichier retrouvable et ${missingCount > 1 ? 'ont' : 'a'} été retirée${missingCount > 1 ? 's' : ''} de la corbeille.` +
+          (stillStuck > 0
+            ? ` ${stillStuck} autre${stillStuck > 1 ? 's' : ''} n'ont pas pu être restaurée${stillStuck > 1 ? 's' : ''} et restent dans la corbeille. Réessaie.`
+            : '')
+      );
+    } else if (stillStuck > 0) {
       Alert.alert(
         'Un souci est survenu',
-        `${before - movedCount} sur ${before} n'ont pas pu être restaurées et restent dans la corbeille. Réessaie.`
+        `${stillStuck} sur ${before} n'ont pas pu être restaurées et restent dans la corbeille. Réessaie.`
       );
     }
   }
