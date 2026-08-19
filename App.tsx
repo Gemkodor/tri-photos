@@ -1,3 +1,4 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
@@ -340,17 +341,39 @@ export default function App() {
           onPress: async () => {
             setDeleting(true);
             try {
+              // One photo at a time, each with its own try/catch: a photo
+              // deleted by the user directly in their gallery (outside the
+              // app) in the meantime has nothing left to move - that alone
+              // shouldn't stop the rest of the batch from being jetées.
+              const handledUris = new Set<string>();
+              let failedCount = 0;
               for (const photo of toDelete) {
-                await moveToTrash({
-                  uri: photo.uri,
-                  name: photo.name,
-                  folderPath: photo.folderPath,
-                });
+                try {
+                  const info = await FileSystem.getInfoAsync(photo.uri);
+                  if (!info.exists) {
+                    // Already gone (deleted elsewhere) - nothing to move,
+                    // just stop tracking it like the others.
+                    handledUris.add(photo.uri);
+                    continue;
+                  }
+                  await moveToTrash({
+                    uri: photo.uri,
+                    name: photo.name,
+                    folderPath: photo.folderPath,
+                  });
+                  handledUris.add(photo.uri);
+                } catch (error) {
+                  console.warn('Erreur déplacement corbeille', error);
+                  failedCount += 1;
+                }
               }
-              const deletedUris = new Set(toDelete.map((p) => p.uri));
-              const remaining = hashedPhotos.filter((p) => !deletedUris.has(p.uri));
+              const remaining = hashedPhotos.filter((p) => !handledUris.has(p.uri));
               setHashedPhotos(remaining);
-              setSelected(new Set());
+              setSelected((prev) => {
+                const next = new Set(prev);
+                handledUris.forEach((uri) => next.delete(uri));
+                return next;
+              });
               await refreshTrash();
               if (lastFolderUri) {
                 await saveAnalysis({
@@ -361,12 +384,12 @@ export default function App() {
                   mode,
                 });
               }
-            } catch (error) {
-              console.warn('Erreur déplacement corbeille', error);
-              Alert.alert(
-                'Un souci est survenu',
-                "Certaines photos n'ont pas pu être mises de côté."
-              );
+              if (failedCount > 0) {
+                Alert.alert(
+                  'Un souci est survenu',
+                  `${failedCount} photo${failedCount > 1 ? 's' : ''} n'ont pas pu être mise${failedCount > 1 ? 's' : ''} de côté. Réessaie.`
+                );
+              }
             } finally {
               setDeleting(false);
             }
