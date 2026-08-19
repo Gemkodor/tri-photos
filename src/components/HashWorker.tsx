@@ -214,8 +214,13 @@ ${
         maxX = Math.max(maxX, p.bottomRight[0]);
         maxY = Math.max(maxY, p.bottomRight[1]);
       }
-      var padX = (maxX - minX) * 0.4;
-      var padY = (maxY - minY) * 0.4;
+      // A little padding around the detected box so the measured region
+      // isn't literally just eyes/nose/mouth (too small and flat to judge
+      // sharpness well) - but not so much that it starts pulling in the
+      // background around the face, which would defeat the point of
+      // measuring the face specifically instead of the whole photo.
+      var padX = (maxX - minX) * 0.15;
+      var padY = (maxY - minY) * 0.15;
       minX = Math.max(0, minX - padX);
       minY = Math.max(0, minY - padY);
       maxX = Math.min(BLUR_SIZE, maxX + padX);
