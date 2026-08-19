@@ -376,7 +376,11 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
     <WebView
       ref={webViewRef}
       originWhitelist={['*']}
-      source={{ html: ANALYZE_HTML, baseUrl: 'file://' + FACE_MODEL_DIR }}
+      source={
+        FACE_DETECTION_ENABLED
+          ? { html: ANALYZE_HTML, baseUrl: 'file://' + FACE_MODEL_DIR }
+          : { html: ANALYZE_HTML }
+      }
       allowFileAccess
       allowFileAccessFromFileURLs
       allowUniversalAccessFromFileURLs
