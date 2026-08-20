@@ -194,6 +194,17 @@ export function groupKey(group: DuplicateGroup): string {
     .join('|');
 }
 
+/**
+ * Whether every photo in the group lives in the same sub-folder. For exact
+ * duplicates, this is what decides whether it's safe to trash any of them
+ * without a second thought (same folder either way) or worth checking which
+ * one to keep first (different folders - trashing the "wrong" one could
+ * leave a sub-folder without any copy at all).
+ */
+export function groupIsSameFolder(group: DuplicateGroup): boolean {
+  return group.photos.every((p) => p.folderPath === group.photos[0].folderPath);
+}
+
 class UnionFind {
   private parent: number[];
 

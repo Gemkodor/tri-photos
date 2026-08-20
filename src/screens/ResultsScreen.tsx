@@ -15,6 +15,7 @@ import {
   bestPhotoReason,
   computeSharpnessBaseline,
   findClosestPair,
+  groupIsSameFolder,
   groupKey,
   isBlurryPhoto,
   nextSortMode,
@@ -594,10 +595,22 @@ export default function ResultsScreen({
                 style={[styles.groupCard, isReviewed && styles.groupCardReviewed]}
               >
                 <View style={styles.groupHeaderRow}>
-                  <Text style={styles.groupLabel}>
-                    Groupe {groupIndex + 1} · {group.photos.length} photos semblables
-                    {isReviewed ? ' · vu' : ''}
-                  </Text>
+                  <View style={styles.groupLabelColumn}>
+                    <Text style={styles.groupLabel}>
+                      Groupe {groupIndex + 1} · {group.photos.length} photos semblables
+                      {isReviewed ? ' · vu' : ''}
+                    </Text>
+                    {mode === 'duplicates' &&
+                      (groupIsSameFolder(group) ? (
+                        <Text style={styles.sameFolderHint}>
+                          📁 même dossier - tu peux jeter n'importe laquelle
+                        </Text>
+                      ) : (
+                        <Text style={styles.differentFolderHint}>
+                          ⚠️ dossiers différents - vérifie laquelle garder
+                        </Text>
+                      ))}
+                  </View>
                   <View style={styles.groupHeaderLinks}>
                     {!keepMode && (
                       <Pressable
@@ -1001,15 +1014,29 @@ const styles = StyleSheet.create({
   },
   groupHeaderRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 10,
+  },
+  groupLabelColumn: {
+    flexShrink: 1,
+    marginRight: 8,
   },
   groupLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: colors.text,
-    flexShrink: 1,
+  },
+  sameFolderHint: {
+    fontSize: 12,
+    color: colors.success,
+    marginTop: 2,
+  },
+  differentFolderHint: {
+    fontSize: 12,
+    color: colors.danger,
+    marginTop: 2,
+    fontWeight: '600',
   },
   groupHeaderLinks: {
     flexDirection: 'row',
