@@ -205,6 +205,24 @@ export function groupIsSameFolder(group: DuplicateGroup): boolean {
   return group.photos.every((p) => p.folderPath === group.photos[0].folderPath);
 }
 
+/** A group's biggest photo is at least this many times its smallest to count as a "big" size gap (roughly a Mo-vs-Ko jump). */
+const SIZE_DIFFERENCE_RATIO = 5;
+
+/**
+ * Whether the photos in this group span a big size gap (a few Mo next to a
+ * few Ko) rather than being roughly the same size - a hint the "duplicates"
+ * might not be as identical as the hash suggests (a resave, a thumbnail...),
+ * worth reviewing more carefully than the straightforward same-size ones.
+ */
+export function groupHasLargeSizeDifference(group: DuplicateGroup): boolean {
+  const sizes = group.photos.map((p) => p.sizeBytes ?? 0).filter((s) => s > 0);
+  if (sizes.length < 2) return false;
+  const smallest = Math.min(...sizes);
+  const biggest = Math.max(...sizes);
+  if (smallest <= 0) return false;
+  return biggest / smallest >= SIZE_DIFFERENCE_RATIO;
+}
+
 class UnionFind {
   private parent: number[];
 

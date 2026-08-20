@@ -15,6 +15,7 @@ import {
   bestPhotoReason,
   computeSharpnessBaseline,
   findClosestPair,
+  groupHasLargeSizeDifference,
   groupIsSameFolder,
   groupKey,
   isBlurryPhoto,
@@ -135,11 +136,17 @@ export default function ResultsScreen({
   const reviewedCount = groups.filter((g) => reviewedGroupKeys.has(groupKey(g))).length;
   const visibleGroups = useMemo(() => {
     const base = showReviewed ? groups : groups.filter((g) => !reviewedGroupKeys.has(groupKey(g)));
-    // Duplicates only: the ones spread across different sub-folders need a
-    // closer look before picking which to keep, so they're worth seeing
-    // first - the same-folder ones (safe to trash any of them) can wait.
+    // Duplicates only, ordered in three tiers: groups spread across
+    // different sub-folders first (need a closer look before picking which
+    // to keep), then same-folder groups with photos of similar size, then
+    // same-folder groups with a big size gap (Mo next to Ko) - the ones
+    // most likely to need a closer look despite matching folders.
     if (mode !== 'duplicates') return base;
-    return [...base].sort((a, b) => Number(groupIsSameFolder(a)) - Number(groupIsSameFolder(b)));
+    return [...base].sort((a, b) => {
+      const folderDiff = Number(groupIsSameFolder(a)) - Number(groupIsSameFolder(b));
+      if (folderDiff !== 0) return folderDiff;
+      return Number(groupHasLargeSizeDifference(a)) - Number(groupHasLargeSizeDifference(b));
+    });
   }, [groups, showReviewed, reviewedGroupKeys, mode]);
 
   const viewerGroup = viewerGroupIndex !== null ? (visibleGroups[viewerGroupIndex] ?? null) : null;
