@@ -133,9 +133,14 @@ export default function ResultsScreen({
   }
 
   const reviewedCount = groups.filter((g) => reviewedGroupKeys.has(groupKey(g))).length;
-  const visibleGroups = showReviewed
-    ? groups
-    : groups.filter((g) => !reviewedGroupKeys.has(groupKey(g)));
+  const visibleGroups = useMemo(() => {
+    const base = showReviewed ? groups : groups.filter((g) => !reviewedGroupKeys.has(groupKey(g)));
+    // Duplicates only: the ones spread across different sub-folders need a
+    // closer look before picking which to keep, so they're worth seeing
+    // first - the same-folder ones (safe to trash any of them) can wait.
+    if (mode !== 'duplicates') return base;
+    return [...base].sort((a, b) => Number(groupIsSameFolder(a)) - Number(groupIsSameFolder(b)));
+  }, [groups, showReviewed, reviewedGroupKeys, mode]);
 
   const viewerGroup = viewerGroupIndex !== null ? (visibleGroups[viewerGroupIndex] ?? null) : null;
   const nextMode = nextSortMode(mode);
