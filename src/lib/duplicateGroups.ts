@@ -32,6 +32,38 @@ export function partSteps(mode: SortMode): SortMode[] {
   return partOf(mode) === 'duplicates' ? ['duplicates'] : ['similar', 'blurry', 'final'];
 }
 
+/**
+ * A 16x16 dHash (256 bits) - see HashWorker.tsx's computeHashBits, which
+ * must produce exactly this many bits. Originally 8x8 (64 bits), which
+ * worked fine on a small folder but started coincidentally grouping
+ * unrelated photos on a big one (hundreds of photos means tens of thousands
+ * of pairs get compared, so even a small per-pair false-match chance turns
+ * up real false positives - the "birthday paradox"). Four times the bits
+ * makes a coincidental close match dramatically less likely, without having
+ * to raise the similarity percentage itself.
+ */
+export const HASH_BITS = 256;
+
+/**
+ * The threshold is a max Hamming distance out of HASH_BITS: lower = only
+ * near-identical copies, higher = also groups photos that merely resemble
+ * each other. Capped at ~60% - validated by hand: past that point, groups
+ * start pulling in photos that aren't really alike.
+ */
+export const SIMILARITY_THRESHOLD_MIN = 0;
+export const SIMILARITY_THRESHOLD_MAX = Math.round((1 - 0.6) * HASH_BITS);
+export const DEFAULT_SIMILARITY_THRESHOLD = Math.round((1 - 0.94) * HASH_BITS);
+
+/** Converts a raw threshold into a "how similar" percentage for display. */
+export function thresholdToPercent(threshold: number): number {
+  return Math.round((1 - threshold / HASH_BITS) * 100);
+}
+
+export function percentToThreshold(percent: number): number {
+  const raw = Math.round((1 - percent / 100) * HASH_BITS);
+  return Math.min(SIMILARITY_THRESHOLD_MAX, Math.max(SIMILARITY_THRESHOLD_MIN, raw));
+}
+
 export const SORT_PARTS: Record<
   SortPart,
   { title: string; description: string; entryMode: SortMode }
@@ -64,17 +96,19 @@ export const SORT_STEPS: Record<
     // rounding during the resize pass...) - real-world testing showed two
     // copies of the same photo landing several bits apart. A wider
     // tolerance here still only catches "same photo" pairs (see
-    // similarityDescription), never unrelated photos.
-    defaultThreshold: 6,
+    // similarityDescription), never unrelated photos. Expressed as a
+    // percent (not a raw bit count) so it keeps meaning the same ~91% no
+    // matter how many bits HASH_BITS ends up being.
+    defaultThreshold: percentToThreshold(91),
   },
   similar: {
     title: 'Photos similaires',
     shortTitle: 'Similaires',
     description:
       "Regroupe les photos prises à la suite (même scène, plusieurs essais), grise celles qui semblent floues, pour t'aider à ne garder que les meilleures.",
-    // 25 -> 61%, Flavie's preferred starting point - the slider still moves
-    // freely from there.
-    defaultThreshold: 25,
+    // Flavie's preferred starting point - the slider still moves freely
+    // from there.
+    defaultThreshold: percentToThreshold(61),
   },
   blurry: {
     title: 'Photos floues sans groupe',
@@ -97,26 +131,6 @@ export function nextSortMode(mode: SortMode): SortMode | null {
   const steps = partSteps(mode);
   const index = steps.indexOf(mode);
   return index >= 0 && index < steps.length - 1 ? steps[index + 1] : null;
-}
-
-/**
- * The threshold is a max Hamming distance out of 64 hash bits: lower = only
- * near-identical copies, higher = also groups photos that merely resemble
- * each other. Capped at 26 (60%) - validated by hand: past that point,
- * groups start pulling in photos that aren't really alike.
- */
-export const SIMILARITY_THRESHOLD_MIN = 0;
-export const SIMILARITY_THRESHOLD_MAX = 26;
-export const DEFAULT_SIMILARITY_THRESHOLD = 4;
-
-/** Converts a raw threshold into a "how similar" percentage for display. */
-export function thresholdToPercent(threshold: number): number {
-  return Math.round((1 - threshold / 64) * 100);
-}
-
-export function percentToThreshold(percent: number): number {
-  const raw = Math.round((1 - percent / 100) * 64);
-  return Math.min(SIMILARITY_THRESHOLD_MAX, Math.max(SIMILARITY_THRESHOLD_MIN, raw));
 }
 
 export function similarityDescription(threshold: number): string {
@@ -143,13 +157,21 @@ function popcount32(n: number): number {
   return (n * 0x01010101) >> 24;
 }
 
-/** Packs a 64-char '0'/'1' string into two uint32s for fast comparison. */
-function packHash(hash: string): [number, number] {
-  return [parseInt(hash.slice(0, 32), 2) >>> 0, parseInt(hash.slice(32, 64), 2) >>> 0];
+/** Packs a HASH_BITS-char '0'/'1' string into uint32 words (32 bits each) for fast comparison. */
+function packHash(hash: string): number[] {
+  const words: number[] = [];
+  for (let i = 0; i < hash.length; i += 32) {
+    words.push(parseInt(hash.slice(i, i + 32), 2) >>> 0);
+  }
+  return words;
 }
 
-export function hammingDistance(a: [number, number], b: [number, number]): number {
-  return popcount32(a[0] ^ b[0]) + popcount32(a[1] ^ b[1]);
+export function hammingDistance(a: number[], b: number[]): number {
+  let total = 0;
+  for (let i = 0; i < a.length; i++) {
+    total += popcount32(a[i] ^ b[i]);
+  }
+  return total;
 }
 
 export type ClosestPair = { a: HashedPhoto; b: HashedPhoto; distance: number };

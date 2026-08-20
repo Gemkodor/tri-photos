@@ -13,7 +13,7 @@ export type HashedPhoto = {
   /** Original pixel dimensions, when available. */
   width: number | null;
   height: number | null;
-  /** 64-bit dHash, as a string of '0'/'1' characters. */
+  /** 256-bit dHash, as a string of '0'/'1' characters. */
   hash: string;
   /** Higher means sharper - only meaningful relative to other photos in the same group. */
   sharpness: number;

@@ -62,12 +62,16 @@ async function ensureFaceModelFiles(): Promise<void> {
   ]);
 }
 
-// Difference-hash (dHash): the tiny image is 9x8 pixels; for each of the 8
-// rows we compare 8 adjacent pixel pairs, giving a 64-bit fingerprint that's
-// stable across resizing, re-compression and minor quality loss - exactly
-// the kind of "same photo, different copy" duplicates we need to catch.
+// Difference-hash (dHash): the tiny image is 17x16 pixels; for each of the
+// 16 rows we compare 16 adjacent pixel pairs, giving a 256-bit fingerprint
+// (must match HASH_BITS in duplicateGroups.ts) that's stable across
+// resizing, re-compression and minor quality loss - exactly the kind of
+// "same photo, different copy" duplicates we need to catch. Originally 9x8
+// (64 bits) - too coarse once folders got into the hundreds of photos:
+// with that many pairwise comparisons, even a small per-pair coincidence
+// rate produced real false matches between unrelated photos.
 //
-// Sharpness: separately drawn at 220x220 (much bigger than the 9x9 hash) so
+// Sharpness: separately drawn at 220x220 (much bigger than the 17x16 hash) so
 // there's enough real detail to measure blur via the variance of the
 // Laplacian (a standard blur-detection trick - blurry images have weaker
 // edges, so the second-derivative response varies less across the image).
@@ -94,7 +98,7 @@ const ANALYZE_HTML = `
 <html>
 <head><meta charset="utf-8" /></head>
 <body style="margin:0">
-<canvas id="c" width="9" height="8" style="display:none"></canvas>
+<canvas id="c" width="17" height="16" style="display:none"></canvas>
 <canvas id="b" width="220" height="220" style="display:none"></canvas>
 ${
   FACE_DETECTION_ENABLED
@@ -167,15 +171,15 @@ ${
   }
 
   function computeHashBits() {
-    var data = hashCtx.getImageData(0, 0, 9, 8).data;
-    var gray = new Array(72);
-    for (var i = 0; i < 72; i++) {
+    var data = hashCtx.getImageData(0, 0, 17, 16).data;
+    var gray = new Array(17 * 16);
+    for (var i = 0; i < gray.length; i++) {
       gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
     }
     var bits = '';
-    for (var y = 0; y < 8; y++) {
-      for (var x = 0; x < 8; x++) {
-        bits += gray[y * 9 + x] < gray[y * 9 + x + 1] ? '1' : '0';
+    for (var y = 0; y < 16; y++) {
+      for (var x = 0; x < 16; x++) {
+        bits += gray[y * 17 + x] < gray[y * 17 + x + 1] ? '1' : '0';
       }
     }
     return bits;
@@ -288,8 +292,8 @@ ${
     var img = new Image();
     img.onload = async function () {
       try {
-        hashCtx.clearRect(0, 0, 9, 8);
-        hashCtx.drawImage(img, 0, 0, 9, 8);
+        hashCtx.clearRect(0, 0, 17, 16);
+        hashCtx.drawImage(img, 0, 0, 17, 16);
         var hash = computeHashBits();
 
         // The duplicates step only ever needs the hash - skipping the
@@ -332,7 +336,7 @@ ${
 `;
 
 export type PhotoMetrics = {
-  /** 64-bit dHash, as a string of '0'/'1' characters. */
+  /** 256-bit dHash, as a string of '0'/'1' characters. */
   hash: string;
   /** Variance of the Laplacian - higher means sharper. Only meaningful when
    *  comparing photos of the same scene against each other. */
