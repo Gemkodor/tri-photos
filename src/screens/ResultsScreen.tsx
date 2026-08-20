@@ -151,6 +151,13 @@ export default function ResultsScreen({
     setViewerPhotoIndex(0);
   }
 
+  /** Opens the group-aware viewer (with ‹ Groupe › navigation) at a specific photo. */
+  function openGroupViewer(groupIndex: number, photoIndex: number) {
+    if (groupIndex < 0 || groupIndex >= visibleGroups.length) return;
+    setViewerGroupIndex(groupIndex);
+    setViewerPhotoIndex(photoIndex);
+  }
+
   function openFlatViewer(photos: HashedPhoto[], index: number, title: string) {
     setFlatViewer({ photos, index, title });
   }
@@ -686,13 +693,7 @@ export default function ResultsScreen({
                         <Pressable
                           style={styles.magnifyBadge}
                           hitSlop={8}
-                          onPress={() =>
-                            openFlatViewer(
-                              group.photos,
-                              photoIndex,
-                              `Groupe ${groupIndex + 1}`
-                            )
-                          }
+                          onPress={() => openGroupViewer(groupIndex, photoIndex)}
                         >
                           <Text style={styles.magnifyBadgeText}>🔍</Text>
                         </Pressable>
