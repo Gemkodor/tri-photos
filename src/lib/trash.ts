@@ -192,7 +192,8 @@ async function relocateEntryToFolder(entry: TrashEntry, folderUri: string): Prom
  */
 async function relocateAll(
   resolveFolderUri: (entry: TrashEntry) => Promise<string>,
-  filterId?: string
+  filterId?: string,
+  onProgress?: (current: number, total: number) => void
 ): Promise<{ movedCount: number; missingCount: number }> {
   const entries = await readManifest();
   const toMove = filterId ? entries.filter((e) => e.id === filterId) : entries;
@@ -201,7 +202,8 @@ async function relocateAll(
   const remaining: TrashEntry[] = [...untouched];
   let movedCount = 0;
   let missingCount = 0;
-  for (const entry of toMove) {
+  for (let i = 0; i < toMove.length; i++) {
+    const entry = toMove[i];
     try {
       const folderUri = await resolveFolderUri(entry);
       await relocateEntryToFolder(entry, folderUri);
@@ -213,6 +215,7 @@ async function relocateAll(
         remaining.push(entry);
       }
     }
+    onProgress?.(i + 1, toMove.length);
   }
   await writeManifest(remaining);
   return { movedCount, missingCount };
@@ -236,10 +239,11 @@ export async function moveOneToSetAside(
 
 /** Moves every corbeille photo into "De côté". */
 export async function moveAllToSetAside(
-  rootUri: string
+  rootUri: string,
+  onProgress?: (current: number, total: number) => void
 ): Promise<{ movedCount: number; missingCount: number }> {
   const setAsideFolderUri = await getSetAsideFolderUri(rootUri);
-  return relocateAll(async () => setAsideFolderUri);
+  return relocateAll(async () => setAsideFolderUri, undefined, onProgress);
 }
 
 /**
@@ -265,7 +269,8 @@ export async function restoreOne(
  * sharing the same sub-folder reuse the same lookup instead of repeating it.
  */
 export async function restoreAll(
-  rootUri: string
+  rootUri: string,
+  onProgress?: (current: number, total: number) => void
 ): Promise<{ movedCount: number; missingCount: number }> {
   const folderCache = new Map<string, Promise<string>>();
   function resolve(entry: TrashEntry): Promise<string> {
@@ -276,7 +281,7 @@ export async function restoreAll(
     }
     return cached;
   }
-  return relocateAll(resolve);
+  return relocateAll(resolve, undefined, onProgress);
 }
 
 const REMINDER_MIN_COUNT = 5;

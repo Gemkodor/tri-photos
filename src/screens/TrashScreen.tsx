@@ -11,6 +11,8 @@ type Props = {
   onRestoreOne: (id: string) => void;
   onRestoreAll: () => void;
   onBack: () => void;
+  /** Non-null while a "Tout ranger"/"Tout restaurer" is in progress. */
+  movingProgress: { current: number; total: number } | null;
 };
 
 export default function TrashScreen({
@@ -20,6 +22,7 @@ export default function TrashScreen({
   onRestoreOne,
   onRestoreAll,
   onBack,
+  movingProgress,
 }: Props) {
   function confirmSetAsideOne(id: string, name: string) {
     Alert.alert(
@@ -77,12 +80,21 @@ export default function TrashScreen({
                   <Pressable
                     style={styles.restoreRowButton}
                     onPress={() => onRestoreOne(item.id)}
+                    disabled={!!movingProgress}
                   >
-                    <Text style={styles.restoreRowButtonText}>Restaurer</Text>
+                    <Text
+                      style={[
+                        styles.restoreRowButtonText,
+                        !!movingProgress && styles.rowButtonTextDisabled,
+                      ]}
+                    >
+                      Restaurer
+                    </Text>
                   </Pressable>
                   <Pressable
-                    style={styles.setAsideRowButton}
+                    style={[styles.setAsideRowButton, !!movingProgress && styles.rowButtonDisabled]}
                     onPress={() => confirmSetAsideOne(item.id, item.originalName)}
+                    disabled={!!movingProgress}
                   >
                     <Text style={styles.setAsideRowButtonText}>Ranger</Text>
                   </Pressable>
@@ -91,12 +103,34 @@ export default function TrashScreen({
             )}
           />
           <View style={styles.bottomBar}>
-            <Pressable style={styles.setAsideAllButton} onPress={confirmSetAsideAll}>
-              <Text style={styles.setAsideAllButtonText}>Tout ranger dans "De côté"</Text>
-            </Pressable>
-            <Pressable style={styles.restoreAllButton} onPress={onRestoreAll}>
-              <Text style={styles.restoreAllButtonText}>Tout restaurer</Text>
-            </Pressable>
+            {movingProgress ? (
+              <View style={styles.progressBlock}>
+                <Text style={styles.progressText}>
+                  Déplacement en cours… {movingProgress.current} / {movingProgress.total}
+                </Text>
+                <View style={styles.progressTrack}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      {
+                        width: `${Math.round(
+                          (movingProgress.current / Math.max(movingProgress.total, 1)) * 100
+                        )}%`,
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            ) : (
+              <>
+                <Pressable style={styles.setAsideAllButton} onPress={confirmSetAsideAll}>
+                  <Text style={styles.setAsideAllButtonText}>Tout ranger dans "De côté"</Text>
+                </Pressable>
+                <Pressable style={styles.restoreAllButton} onPress={onRestoreAll}>
+                  <Text style={styles.restoreAllButtonText}>Tout restaurer</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </>
       )}
@@ -192,6 +226,34 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 13,
     fontWeight: '600',
+  },
+  rowButtonDisabled: {
+    opacity: 0.4,
+  },
+  rowButtonTextDisabled: {
+    opacity: 0.4,
+  },
+  progressBlock: {
+    paddingVertical: 4,
+  },
+  progressText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  progressTrack: {
+    width: '100%',
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.border,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+    borderRadius: 5,
   },
   bottomBar: {
     position: 'absolute',

@@ -65,6 +65,13 @@ export default function App() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([]);
+  // Shown as a progress bar on the trash screen during "Tout ranger"/"Tout
+  // restaurer" - moving many photos one by one can take a while, and with
+  // nothing on screen it was impossible to tell "it's just slow" from "it's
+  // stuck".
+  const [movingProgress, setMovingProgress] = useState<{ current: number; total: number } | null>(
+    null
+  );
   const [reviewedGroupKeys, setReviewedGroupKeys] = useState<Set<string>>(new Set());
 
   const hashWorkerRef = useRef<HashWorkerHandle>(null);
@@ -436,7 +443,11 @@ export default function App() {
       return;
     }
     const before = trashEntries.length;
-    const { movedCount, missingCount } = await moveAllToSetAside(lastFolderUri);
+    setMovingProgress({ current: 0, total: before });
+    const { movedCount, missingCount } = await moveAllToSetAside(lastFolderUri, (current, total) =>
+      setMovingProgress({ current, total })
+    );
+    setMovingProgress(null);
     await refreshTrash();
     const stillStuck = before - movedCount - missingCount;
     if (missingCount > 0) {
@@ -475,7 +486,11 @@ export default function App() {
       return;
     }
     const before = trashEntries.length;
-    const { movedCount, missingCount } = await restoreAll(lastFolderUri);
+    setMovingProgress({ current: 0, total: before });
+    const { movedCount, missingCount } = await restoreAll(lastFolderUri, (current, total) =>
+      setMovingProgress({ current, total })
+    );
+    setMovingProgress(null);
     await refreshTrash();
     const stillStuck = before - movedCount - missingCount;
     if (missingCount > 0) {
@@ -551,6 +566,7 @@ export default function App() {
             onRestoreOne={handleRestoreOne}
             onRestoreAll={handleRestoreAll}
             onBack={() => setScreen(hashedPhotos.length > 0 ? 'results' : 'home')}
+            movingProgress={movingProgress}
           />
         )}
       </SafeContent>
