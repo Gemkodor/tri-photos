@@ -72,7 +72,12 @@ export default function TrashScreen({
             contentContainerStyle={styles.list}
             renderItem={({ item }) => (
               <View style={styles.row}>
-                <Image source={{ uri: item.uri }} style={styles.thumb} contentFit="cover" />
+                <Image
+                  source={{ uri: item.uri }}
+                  recyclingKey={item.uri}
+                  style={styles.thumb}
+                  contentFit="cover"
+                />
                 <Text style={styles.rowName} numberOfLines={1}>
                   {item.originalName}
                 </Text>

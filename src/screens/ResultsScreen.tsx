@@ -434,6 +434,7 @@ export default function ResultsScreen({
                   >
                     <Image
                       source={{ uri: photo.uri }}
+                      recyclingKey={photo.uri}
                       style={[
                         styles.thumb,
                         !isSelected && photoIsBlurry && styles.thumbBlurry,
@@ -516,6 +517,7 @@ export default function ResultsScreen({
                   >
                     <Image
                       source={{ uri: photo.uri }}
+                      recyclingKey={photo.uri}
                       style={[styles.thumb, styles.thumbBlurry, isSelected && styles.thumbSelected]}
                       contentFit="cover"
                     />
@@ -568,6 +570,7 @@ export default function ResultsScreen({
                   <View key={photo.uri} style={styles.blurGridItem}>
                     <Image
                       source={{ uri: photo.uri }}
+                      recyclingKey={photo.uri}
                       style={[
                         styles.thumb,
                         photoIsBlurry && status === 'keep' && styles.thumbBlurry,
@@ -666,6 +669,7 @@ export default function ResultsScreen({
                   <View key={photo.uri} style={styles.blurGridItem}>
                     <Image
                       source={{ uri: photo.uri }}
+                      recyclingKey={photo.uri}
                       style={[
                         styles.thumb,
                         photoIsBlurry && !isSelected && styles.thumbBlurry,
@@ -767,6 +771,7 @@ export default function ResultsScreen({
                         <View key={photo.uri} style={styles.thumbWrapper}>
                           <Image
                             source={{ uri: photo.uri }}
+                      recyclingKey={photo.uri}
                             style={[
                               styles.thumb,
                               photoIsBlurry && status === 'keep' && styles.thumbBlurry,
@@ -1013,6 +1018,7 @@ export default function ResultsScreen({
                       >
                         <Image
                           source={{ uri: photo.uri }}
+                      recyclingKey={photo.uri}
                           style={[
                             styles.thumb,
                             !keepMode && isSelected && styles.thumbSelected,
@@ -1230,6 +1236,7 @@ export default function ResultsScreen({
                     >
                       <Image
                         source={{ uri: first?.uri }}
+                        recyclingKey={first?.uri}
                         style={styles.movePickerThumb}
                         contentFit="cover"
                       />

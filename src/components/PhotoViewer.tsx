@@ -115,7 +115,12 @@ export default function PhotoViewer({
       >
         {photos.map((p) => (
           <View key={p.uri} style={[styles.page, { width }]}>
-            <Image source={{ uri: p.uri }} style={styles.fullImage} contentFit="contain" />
+            <Image
+              source={{ uri: p.uri }}
+              recyclingKey={p.uri}
+              style={styles.fullImage}
+              contentFit="contain"
+            />
           </View>
         ))}
       </ScrollView>
