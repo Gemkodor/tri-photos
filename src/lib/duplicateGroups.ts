@@ -399,9 +399,18 @@ export function groupByMoments(photos: HashedPhoto[], maxGapMs: number): Duplica
   const withoutTime = photos.filter((p) => p.capturedAt === null);
 
   const groups: DuplicateGroup[] = [];
-  let current: HashedPhoto[] = [];
   let groupIndex = 0;
 
+  // Undated photos first: there's nothing to place them next to with any
+  // confidence, so each starts out alone - shown first specifically so
+  // they're easy to check against the dated moments right below and
+  // dragged in by hand if they really do belong to one (see
+  // moveMomentPhoto in App.tsx).
+  for (const photo of withoutTime) {
+    groups.push({ id: `moment-${groupIndex++}`, photos: [photo] });
+  }
+
+  let current: HashedPhoto[] = [];
   function flush() {
     if (current.length === 0) return;
     current.sort(bestPhotoFirst);
@@ -417,10 +426,6 @@ export function groupByMoments(photos: HashedPhoto[], maxGapMs: number): Duplica
     current.push(photo);
   }
   flush();
-
-  for (const photo of withoutTime) {
-    groups.push({ id: `moment-${groupIndex++}`, photos: [photo] });
-  }
 
   return groups;
 }

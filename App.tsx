@@ -18,6 +18,7 @@ import {
   SAME_SESSION_MAX_GAP_MS,
   SORT_STEP_ORDER,
   SORT_STEPS,
+  type DuplicateGroup,
   type SortMode,
 } from './src/lib/duplicateGroups';
 import { pickFolder, scanFolderForImages } from './src/lib/imageFiles';
@@ -80,11 +81,17 @@ export default function App() {
     null
   );
   const [reviewedGroupKeys, setReviewedGroupKeys] = useState<Set<string>>(new Set());
+  // "moments" grouping starts out computed (groupByMoments), but unlike
+  // every other step it can then be hand-edited (move a photo to another
+  // moment, or split it out into its own) - so it lives in its own state,
+  // seeded once when that scan finishes, instead of being recomputed (and
+  // silently discarding any edits) on every render.
+  const [momentGroups, setMomentGroups] = useState<DuplicateGroup[]>([]);
 
   const hashWorkerRef = useRef<HashWorkerHandle>(null);
 
   const groups = useMemo(() => {
-    if (mode === 'moments') return groupByMoments(hashedPhotos, MOMENT_GAP_MS);
+    if (mode === 'moments') return momentGroups;
     return groupDuplicates(
       hashedPhotos,
       similarityThreshold,
@@ -97,7 +104,7 @@ export default function App() {
       // carry a copy/save time completely unrelated to the original shot.
       mode !== 'duplicates' ? SAME_SESSION_MAX_GAP_MS : undefined
     );
-  }, [hashedPhotos, similarityThreshold, mode]);
+  }, [hashedPhotos, similarityThreshold, mode, momentGroups]);
 
   const trashReminder = useMemo(() => getTrashReminder(trashEntries), [trashEntries]);
 
@@ -189,6 +196,9 @@ export default function App() {
       const threshold = SORT_STEPS[forMode].defaultThreshold;
       setHashedPhotos(hashed);
       setHasSharpness(forMode !== 'duplicates');
+      if (forMode === 'moments') {
+        setMomentGroups(groupByMoments(hashed, MOMENT_GAP_MS));
+      }
       setMode(forMode);
       setSimilarityThreshold(threshold);
       setSelected(new Set());
@@ -401,6 +411,34 @@ export default function App() {
       if (shouldHave) next.add(uri);
       else next.delete(uri);
       return next;
+    });
+  }
+
+  /**
+   * Hand-editing for "moments": moves a photo out of whatever group it's
+   * currently in and into `targetGroupId` (or, with 'new', into a brand
+   * new group of its own - the same action covers both "this one doesn't
+   * belong with the rest of this moment" and "pull an undated photo into
+   * the moment it actually belongs to", just picking a different target).
+   * A group left empty by the move is dropped.
+   */
+  function moveMomentPhoto(photoUri: string, targetGroupId: string | 'new') {
+    setMomentGroups((prev) => {
+      let movedPhoto: HashedPhoto | undefined;
+      const withoutPhoto = prev
+        .map((g) => {
+          const photo = g.photos.find((p) => p.uri === photoUri);
+          if (photo) movedPhoto = photo;
+          return { ...g, photos: g.photos.filter((p) => p.uri !== photoUri) };
+        })
+        .filter((g) => g.photos.length > 0);
+      if (!movedPhoto) return prev;
+      if (targetGroupId === 'new') {
+        return [...withoutPhoto, { id: `moment-manual-${Date.now()}`, photos: [movedPhoto] }];
+      }
+      return withoutPhoto.map((g) =>
+        g.id === targetGroupId ? { ...g, photos: [...g.photos, movedPhoto as HashedPhoto] } : g
+      );
     });
   }
 
@@ -617,6 +655,7 @@ export default function App() {
             onSwitchMode={switchMode}
             onFinishSorting={handleFinishSorting}
             faceModelDiagnostic={faceModelDiagnostic}
+            onMoveMomentPhoto={moveMomentPhoto}
           />
         )}
 

@@ -56,6 +56,8 @@ type Props = {
   onFinishSorting: () => void;
   /** Debug: why face detection did or didn't come up during the last scan. */
   faceModelDiagnostic: string | null;
+  /** "moments" only: moves a photo into another moment group, or 'new' for a fresh group of its own. */
+  onMoveMomentPhoto: (photoUri: string, targetGroupId: string | 'new') => void;
 };
 
 type FlatViewer = { photos: HashedPhoto[]; index: number; title: string };
@@ -83,10 +85,16 @@ export default function ResultsScreen({
   onSwitchMode,
   onFinishSorting,
   faceModelDiagnostic,
+  onMoveMomentPhoto,
 }: Props) {
   const [viewerGroupIndex, setViewerGroupIndex] = useState<number | null>(null);
   const [viewerPhotoIndex, setViewerPhotoIndex] = useState(0);
   const [flatViewer, setFlatViewer] = useState<FlatViewer | null>(null);
+  // "moments" hand-editing: which photo is currently choosing a group to
+  // move to (null = picker closed).
+  const [movePickerFor, setMovePickerFor] = useState<{ photoUri: string; groupId: string } | null>(
+    null
+  );
   const [showReviewed, setShowReviewed] = useState(false);
   const [keepMode, setKeepMode] = useState(false);
   const [kept, setKept] = useState<Set<string>>(new Set());
@@ -792,6 +800,12 @@ export default function ResultsScreen({
                             <Text style={styles.statusButtonText}>🗑</Text>
                           </Pressable>
                         </View>
+                        <Pressable
+                          style={styles.moveButton}
+                          onPress={() => setMovePickerFor({ photoUri: photo.uri, groupId: group.id })}
+                        >
+                          <Text style={styles.moveButtonText}>↔️ Déplacer</Text>
+                        </Pressable>
                       </View>
                     );
                   })}
@@ -1112,6 +1126,62 @@ export default function ResultsScreen({
             onNextGroup={() => {}}
           />
         )}
+      </Modal>
+
+      <Modal
+        visible={movePickerFor !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setMovePickerFor(null)}
+      >
+        <Pressable style={styles.movePickerBackdrop} onPress={() => setMovePickerFor(null)}>
+          <View style={styles.movePickerSheet}>
+            <Text style={styles.movePickerTitle}>Déplacer cette photo vers…</Text>
+            <ScrollView style={styles.movePickerList}>
+              <Pressable
+                style={styles.movePickerOption}
+                onPress={() => {
+                  if (movePickerFor) onMoveMomentPhoto(movePickerFor.photoUri, 'new');
+                  setMovePickerFor(null);
+                }}
+              >
+                <Text style={styles.movePickerOptionText}>➕ Nouveau groupe séparé</Text>
+              </Pressable>
+              {groups
+                .filter((g) => g.id !== movePickerFor?.groupId)
+                .map((g, i) => {
+                  const first = g.photos[0];
+                  const label = first?.capturedAt
+                    ? new Date(first.capturedAt).toLocaleString('fr-FR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : 'Sans date';
+                  return (
+                    <Pressable
+                      key={g.id}
+                      style={styles.movePickerOption}
+                      onPress={() => {
+                        if (movePickerFor) onMoveMomentPhoto(movePickerFor.photoUri, g.id);
+                        setMovePickerFor(null);
+                      }}
+                    >
+                      <Text style={styles.movePickerOptionText}>
+                        Moment {groups.indexOf(g) + 1} · {label} · {g.photos.length} photo
+                        {g.photos.length > 1 ? 's' : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+            </ScrollView>
+            <Pressable style={styles.movePickerCancel} onPress={() => setMovePickerFor(null)}>
+              <Text style={styles.movePickerCancelText}>Annuler</Text>
+            </Pressable>
+          </View>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -1514,6 +1584,59 @@ const styles = StyleSheet.create({
   },
   statusButtonText: {
     fontSize: 15,
+  },
+  moveButton: {
+    marginTop: 6,
+    paddingVertical: 6,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  moveButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.subtleText,
+  },
+  movePickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  movePickerSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '70%',
+  },
+  movePickerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 12,
+  },
+  movePickerList: {
+    marginBottom: 12,
+  },
+  movePickerOption: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  movePickerOptionText: {
+    fontSize: 14,
+    color: colors.text,
+  },
+  movePickerCancel: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  movePickerCancelText: {
+    color: colors.subtleText,
+    fontSize: 14,
+    fontWeight: '600',
   },
   bottomBar: {
     position: 'absolute',
