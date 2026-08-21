@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import PhotoViewer from '../components/PhotoViewer';
@@ -60,6 +61,12 @@ type Props = {
   onMoveMomentPhotos: (photoUris: string[], targetGroupId: string | 'new') => void;
   /** "moments" only: nudges a group up or down in the list. */
   onMoveMomentGroup: (groupId: string, direction: 'up' | 'down') => void;
+  /** "album"/"quality" only: photos picked to copy into a new folder. */
+  albumUris: Set<string>;
+  onToggleAlbum: (uri: string) => void;
+  albumExporting: boolean;
+  albumExportProgress: { current: number; total: number } | null;
+  onCreateAlbum: (name: string) => void;
 };
 
 type FlatViewer = { photos: HashedPhoto[]; index: number; title: string };
@@ -89,10 +96,20 @@ export default function ResultsScreen({
   faceModelDiagnostic,
   onMoveMomentPhotos,
   onMoveMomentGroup,
+  albumUris,
+  onToggleAlbum,
+  albumExporting,
+  albumExportProgress,
+  onCreateAlbum,
 }: Props) {
   const [viewerGroupIndex, setViewerGroupIndex] = useState<number | null>(null);
   const [viewerPhotoIndex, setViewerPhotoIndex] = useState(0);
   const [flatViewer, setFlatViewer] = useState<FlatViewer | null>(null);
+  // "album"/"quality": whether the grid is filtered down to just the
+  // current selection, and the name-entry modal for creating the folder.
+  const [showOnlyAlbum, setShowOnlyAlbum] = useState(false);
+  const [albumNameModalOpen, setAlbumNameModalOpen] = useState(false);
+  const [albumName, setAlbumName] = useState('');
   // "moments" hand-editing: photos picked to move together, and whether
   // the "choose a group" picker is currently open for them.
   const [moveSelection, setMoveSelection] = useState<Set<string>>(new Set());
@@ -154,6 +171,10 @@ export default function ResultsScreen({
   const laterPhotos = useMemo(
     () => allPhotos.filter((p) => laterUris.has(p.uri)),
     [allPhotos, laterUris]
+  );
+  const albumGridPhotos = useMemo(
+    () => (showOnlyAlbum ? allPhotos.filter((p) => albumUris.has(p.uri)) : allPhotos),
+    [allPhotos, albumUris, showOnlyAlbum]
   );
 
   function isBlurry(photo: HashedPhoto): boolean {
@@ -279,6 +300,11 @@ export default function ResultsScreen({
       return groups.length === 0
         ? 'Aucune photo'
         : `${groups.length} moment${groups.length > 1 ? 's' : ''}`;
+    }
+    if (mode === 'album' || mode === 'quality') {
+      return allPhotos.length === 0
+        ? 'Aucune photo'
+        : `${allPhotos.length} photo${allPhotos.length > 1 ? 's' : ''}${albumUris.size > 0 ? ` · ${albumUris.size} sélectionnée${albumUris.size > 1 ? 's' : ''}` : ''}`;
     }
     if (groups.length === 0) return 'Aucun doublon trouvé';
     const noun = mode === 'duplicates' ? 'identiques' : 'semblables';
@@ -421,6 +447,13 @@ export default function ResultsScreen({
               >
                 <Text style={styles.selectAllButtonText}>🌫 Toutes les photos floues</Text>
               </Pressable>
+              {nextMode && (
+                <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
+                  <Text style={styles.selectAllButtonText}>
+                    ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                  </Text>
+                </Pressable>
+              )}
               <Pressable style={styles.finishButton} onPress={onFinishSorting}>
                 <Text style={styles.finishButtonText}>✅ Terminer le tri</Text>
               </Pressable>
@@ -733,6 +766,15 @@ export default function ResultsScreen({
               garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle. Coche une ou plusieurs photos (le
               rond en haut à gauche) pour les déplacer ensemble vers un autre moment.
             </Text>
+            {nextMode && (
+              <View style={styles.bulkActionsRow}>
+                <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
+                  <Text style={styles.selectAllButtonText}>
+                    ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
             {visibleGroups.map((group, groupIndex) => {
               const allChecked = group.photos.every((p) => moveSelection.has(p.uri));
               return (
@@ -883,6 +925,82 @@ export default function ResultsScreen({
                 </View>
               );
             })}
+          </ScrollView>
+        )
+      ) : mode === 'album' || mode === 'quality' ? (
+        allPhotos.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>Il n'y a plus de photo dans ce dossier.</Text>
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.list}>
+            <Text style={styles.instructions}>
+              {mode === 'album'
+                ? "Touche les photos que tu veux mettre dans ton album. 🌫 repère celles de qualité moyenne, à éviter pour un album. Touche la loupe pour voir en grand."
+                : 'Chaque photo est marquée si elle semble de qualité moyenne (🌫). Touche celles que tu veux copier ailleurs.'}
+            </Text>
+            {albumUris.size > 0 && (
+              <View style={styles.bulkActionsRow}>
+                <Pressable style={styles.selectAllButton} onPress={() => setShowOnlyAlbum((v) => !v)}>
+                  <Text style={styles.selectAllButtonText}>
+                    {showOnlyAlbum
+                      ? '👁 Voir toutes les photos'
+                      : `👁 Voir seulement la sélection (${albumUris.size})`}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+            <View style={styles.blurGrid}>
+              {albumGridPhotos.map((photo, index) => {
+                const isAlbumSelected = albumUris.has(photo.uri);
+                const photoIsMediocre = isBlurry(photo);
+                return (
+                  <Pressable
+                    key={photo.uri}
+                    style={styles.blurGridItem}
+                    onPress={() => onToggleAlbum(photo.uri)}
+                  >
+                    <Image
+                      source={{ uri: photo.uri }}
+                      recyclingKey={photo.uri}
+                      style={[
+                        styles.thumb,
+                        isAlbumSelected && styles.thumbAlbumSelected,
+                        !isAlbumSelected && photoIsMediocre && styles.thumbBlurry,
+                      ]}
+                      contentFit="cover"
+                    />
+                    {isAlbumSelected ? (
+                      <View style={styles.albumBadge}>
+                        <Text style={styles.albumBadgeText}>📁</Text>
+                      </View>
+                    ) : (
+                      photoIsMediocre && (
+                        <View style={styles.blurBadge}>
+                          <Text style={styles.blurBadgeText}>🌫 qualité moyenne</Text>
+                        </View>
+                      )
+                    )}
+                    <Pressable
+                      style={styles.magnifyBadge}
+                      hitSlop={8}
+                      onPress={() =>
+                        openFlatViewer(
+                          albumGridPhotos,
+                          index,
+                          mode === 'album' ? 'Choisir un album' : 'Qualité des photos'
+                        )
+                      }
+                    >
+                      <Text style={styles.magnifyBadgeText}>🔍</Text>
+                    </Pressable>
+                    <Text style={styles.thumbSize} numberOfLines={1}>
+                      net. {Math.round(photo.sharpness)} ({photo.facesFound ? 'visage' : 'photo'})
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </ScrollView>
         )
       ) : groups.length === 0 ? (
@@ -1133,8 +1251,52 @@ export default function ResultsScreen({
         </View>
       )}
 
+      {(mode === 'album' || mode === 'quality') && allPhotos.length > 0 && (
+        <View style={styles.bottomBar}>
+          {albumExporting ? (
+            <View style={styles.progressBlock}>
+              <Text style={styles.progressText}>
+                Copie en cours… {albumExportProgress?.current ?? 0} / {albumExportProgress?.total ?? 0}
+              </Text>
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    {
+                      width: `${Math.round(
+                        ((albumExportProgress?.current ?? 0) /
+                          Math.max(albumExportProgress?.total ?? 1, 1)) *
+                          100
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          ) : (
+            <Pressable
+              style={[
+                styles.deleteButton,
+                styles.albumCreateButton,
+                albumUris.size === 0 && styles.deleteButtonDisabled,
+              ]}
+              disabled={albumUris.size === 0}
+              onPress={() => setAlbumNameModalOpen(true)}
+            >
+              <Text style={styles.deleteButtonText}>
+                {albumUris.size === 0
+                  ? 'Touche des photos pour les choisir'
+                  : `📁 Copier ${albumUris.size} photo${albumUris.size > 1 ? 's' : ''} dans un dossier`}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
       {!keepMode &&
         mode !== 'moments' &&
+        mode !== 'album' &&
+        mode !== 'quality' &&
         (mode === 'final' || mode === 'decide'
           ? allPhotos.length > 0
           : mode === 'blurry'
@@ -1284,6 +1446,50 @@ export default function ResultsScreen({
               <Text style={styles.movePickerCancelText}>Annuler</Text>
             </Pressable>
           </View>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={albumNameModalOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setAlbumNameModalOpen(false)}
+      >
+        <Pressable style={styles.movePickerBackdrop} onPress={() => setAlbumNameModalOpen(false)}>
+          <Pressable style={styles.albumNameSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.movePickerTitle}>Nom de l'album</Text>
+            <TextInput
+              style={styles.albumNameInput}
+              value={albumName}
+              onChangeText={setAlbumName}
+              placeholder="Ex. Vacances été 2026"
+              placeholderTextColor={colors.subtleText}
+              autoFocus
+            />
+            <Text style={styles.albumNameHint}>
+              Tu choisiras ensuite où le mettre. Les photos seront copiées, pas déplacées : rien ne
+              change dans ton dossier d'origine.
+            </Text>
+            <Pressable
+              style={[
+                styles.deleteButton,
+                styles.albumCreateButton,
+                !albumName.trim() && styles.deleteButtonDisabled,
+              ]}
+              disabled={!albumName.trim()}
+              onPress={() => {
+                const name = albumName.trim();
+                setAlbumNameModalOpen(false);
+                setAlbumName('');
+                onCreateAlbum(name);
+              }}
+            >
+              <Text style={styles.deleteButtonText}>Continuer</Text>
+            </Pressable>
+            <Pressable style={styles.movePickerCancel} onPress={() => setAlbumNameModalOpen(false)}>
+              <Text style={styles.movePickerCancelText}>Annuler</Text>
+            </Pressable>
+          </Pressable>
         </Pressable>
       </Modal>
     </View>
@@ -1565,6 +1771,10 @@ const styles = StyleSheet.create({
   thumbLater: {
     opacity: 0.6,
   },
+  thumbAlbumSelected: {
+    borderWidth: 3,
+    borderColor: colors.primary,
+  },
   blurGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1665,6 +1875,20 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 11,
     fontWeight: '700',
+  },
+  albumBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  albumBadgeText: {
+    fontSize: 14,
   },
   statusRow: {
     flexDirection: 'row',
@@ -1808,5 +2032,52 @@ const styles = StyleSheet.create({
     color: colors.primaryText,
     fontSize: 16,
     fontWeight: '600',
+  },
+  albumCreateButton: {
+    backgroundColor: colors.primary,
+  },
+  progressBlock: {
+    paddingVertical: 4,
+  },
+  progressText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  progressTrack: {
+    width: '100%',
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.border,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+    borderRadius: 5,
+  },
+  albumNameSheet: {
+    backgroundColor: colors.card,
+    borderRadius: 20,
+    padding: 20,
+    width: '100%',
+  },
+  albumNameInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    color: colors.text,
+    marginBottom: 10,
+  },
+  albumNameHint: {
+    fontSize: 12,
+    color: colors.subtleText,
+    lineHeight: 17,
+    marginBottom: 16,
   },
 });

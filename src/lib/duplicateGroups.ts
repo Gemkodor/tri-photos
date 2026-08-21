@@ -1,27 +1,30 @@
 import type { HashedPhoto } from './perceptualHash';
 
 /**
- * The app is two entirely separate parts, each with its own analysis - on
- * purpose: crossing between them used to silently trigger a second, deeper
- * re-analysis of the same folder, which was confusing. Now the only way
- * from one to the other is back through the home screen.
+ * The app is several entirely separate parts, each with its own analysis -
+ * on purpose: crossing between them used to silently trigger a second,
+ * deeper re-analysis of the same folder, which was confusing. Now the only
+ * way from one to the other is back through the home screen.
  *
  * Part "duplicates" is a single, deliberately minimal, fast pass that just
  * catches exact duplicates (fixed at 100% - no wiggle room, no face
  * detection) - useful on a big folder with lots of subfolders. Part
- * "sorting" is a second, deeper pass with five steps you can move between
- * freely: "similar" groups photos from the same shooting session (burst
- * shots) and marks the blurry ones within each group so both jobs happen at
- * once, "blurry" is next with just the blurry photos that didn't land in
- * any group (nothing to compare them against there, so they need their own
- * pass), "decide" is a first pass over every remaining photo where each one
- * gets marked keep/later/trash, "later" gathers just the ones marked
- * "later" for a focused second look, and "final" is a last pass over every
- * photo still in the folder, still marking blurry ones. Part "moments" is a
- * third, independent pass that groups every photo purely by *when* it was
- * taken (not what it looks like) - even a single photo taken well apart
- * from any other gets its own group of one - with blur marked and the same
- * keep/later/trash choice as "decide", all in one single step.
+ * "sorting" is a second, deeper pass: "similar" groups photos from the same
+ * shooting session (burst shots) and marks the blurry ones within each
+ * group so both jobs happen at once, "blurry" is next with just the blurry
+ * photos that didn't land in any group (nothing to compare them against
+ * there, so they need their own pass), "decide" is a first pass over every
+ * remaining photo where each one gets marked keep/later/trash, "later"
+ * gathers just the ones marked "later" for a focused second look, "final"
+ * is a last pass over every photo still in the folder, still marking blurry
+ * ones, and "album" closes it out with a chance to pick photos for an
+ * album. Part "moments" is a third, independent pass that groups every
+ * photo purely by *when* it was taken (not what it looks like) - even a
+ * single photo taken well apart from any other gets its own group of one -
+ * with blur marked and the same keep/later/trash choice as "decide", then
+ * it too ends on "album". Part "quality" is a fourth, independent pass with
+ * no grouping at all - just every photo in the folder marked good or
+ * middling quality, to pick some to copy elsewhere.
  */
 export type SortMode =
   | 'duplicates'
@@ -30,8 +33,10 @@ export type SortMode =
   | 'decide'
   | 'later'
   | 'final'
-  | 'moments';
-export type SortPart = 'duplicates' | 'sorting' | 'moments';
+  | 'moments'
+  | 'album'
+  | 'quality';
+export type SortPart = 'duplicates' | 'sorting' | 'moments' | 'quality';
 
 export const SORT_STEP_ORDER: SortMode[] = [
   'duplicates',
@@ -41,21 +46,32 @@ export const SORT_STEP_ORDER: SortMode[] = [
   'later',
   'final',
   'moments',
+  'album',
+  'quality',
 ];
-export const SORT_PART_ORDER: SortPart[] = ['duplicates', 'sorting', 'moments'];
+export const SORT_PART_ORDER: SortPart[] = ['duplicates', 'sorting', 'moments', 'quality'];
 
 export function partOf(mode: SortMode): SortPart {
   if (mode === 'duplicates') return 'duplicates';
   if (mode === 'moments') return 'moments';
+  if (mode === 'quality') return 'quality';
   return 'sorting';
 }
 
-/** The steps belonging to the same part as `mode` - used for the step nav, so it never offers a cross-part jump. */
+/**
+ * The steps belonging to the same part as `mode` - used for the step nav, so
+ * it never offers a cross-part jump. "album" is reachable at the end of both
+ * "sorting" and "moments" (via nextSortMode), but shown on its own once
+ * there - it doesn't belong more to one than the other, and re-showing
+ * either one's whole step list from inside "album" would be misleading.
+ */
 export function partSteps(mode: SortMode): SortMode[] {
+  if (mode === 'album') return ['album'];
   const part = partOf(mode);
   if (part === 'duplicates') return ['duplicates'];
-  if (part === 'moments') return ['moments'];
-  return ['similar', 'blurry', 'decide', 'later', 'final'];
+  if (part === 'quality') return ['quality'];
+  if (part === 'moments') return ['moments', 'album'];
+  return ['similar', 'blurry', 'decide', 'later', 'final', 'album'];
 }
 
 /**
@@ -111,6 +127,12 @@ export const SORT_PARTS: Record<
     description:
       "Regroupe toutes les photos par moment (quand elles ont été prises), sans regarder si elles se ressemblent - pour trier chronologiquement plutôt que par similarité.",
     entryMode: 'moments',
+  },
+  quality: {
+    title: 'Qualité des photos',
+    description:
+      "Analyse un dossier pour repérer les photos nettes et celles de qualité moyenne, sans les regrouper - pour choisir facilement lesquelles copier ailleurs (par exemple pour un album), sans toucher aux photos d'origine.",
+    entryMode: 'quality',
   },
 };
 
@@ -174,6 +196,20 @@ export const SORT_STEPS: Record<
     shortTitle: 'Moments',
     description:
       "Regroupe toutes les photos par moment plutôt que par ressemblance - marque les floues, et choisis pour chacune : garder, plus tard, ou poubelle.",
+    defaultThreshold: 0,
+  },
+  album: {
+    title: 'Choisir un album',
+    shortTitle: 'Album',
+    description:
+      "Choisis les photos que tu veux mettre dans un album, puis crée un nouveau dossier avec des copies - tes photos d'origine ne bougent pas.",
+    defaultThreshold: 0,
+  },
+  quality: {
+    title: 'Qualité des photos',
+    shortTitle: 'Qualité',
+    description:
+      "Chaque photo est marquée si elle semble de qualité moyenne. Choisis celles à copier ailleurs.",
     defaultThreshold: 0,
   },
 };

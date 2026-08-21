@@ -25,7 +25,7 @@ export default function HomeScreen({
       <View style={styles.hero}>
         <Text style={styles.title}>Tri Photos</Text>
         <Text style={styles.subtitle}>
-          Ton assistant de tri, en deux parties indépendantes. Choisis celle par laquelle
+          Ton assistant de tri, en plusieurs parties indépendantes. Choisis celle par laquelle
           commencer.
         </Text>
       </View>

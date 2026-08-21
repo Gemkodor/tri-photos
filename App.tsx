@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import HashWorker, { HashWorkerHandle } from './src/components/HashWorker';
+import { copyPhotosToNewFolder } from './src/lib/albumExport';
 import { getSavedAnalysis, saveAnalysis } from './src/lib/analysisStorage';
 import {
   startScanningService,
@@ -87,6 +88,15 @@ export default function App() {
   // seeded once when that scan finishes, instead of being recomputed (and
   // silently discarding any edits) on every render.
   const [momentGroups, setMomentGroups] = useState<DuplicateGroup[]>([]);
+  // "album"/"quality" steps: photos picked to copy into a new folder - its
+  // own set, independent of `selected` (poubelle) and `laterUris`, since
+  // being in an album has nothing to do with either of those.
+  const [albumUris, setAlbumUris] = useState<Set<string>>(new Set());
+  const [albumExporting, setAlbumExporting] = useState(false);
+  const [albumExportProgress, setAlbumExportProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
 
   const hashWorkerRef = useRef<HashWorkerHandle>(null);
 
@@ -212,6 +222,7 @@ export default function App() {
       setSimilarityThreshold(threshold);
       setSelected(new Set());
       setLaterUris(new Set());
+      setAlbumUris(new Set());
       setReviewedGroupKeys(new Set());
       setScreen('results');
       await saveAnalysis({
@@ -403,6 +414,54 @@ export default function App() {
       });
       return changed ? next : prev;
     });
+  }
+
+  function toggleAlbum(uri: string) {
+    setAlbumUris((prev) => {
+      const next = new Set(prev);
+      if (next.has(uri)) next.delete(uri);
+      else next.add(uri);
+      return next;
+    });
+  }
+
+  /**
+   * Copies every photo currently marked for the album into a new (or
+   * reused) sub-folder named `name`, inside a folder the user picks via the
+   * native folder chooser - always a copy, the originals never move.
+   */
+  async function handleCreateAlbum(name: string) {
+    const toExport = hashedPhotos.filter((p) => albumUris.has(p.uri));
+    if (toExport.length === 0) return;
+    const parentUri = await pickFolder(lastFolderUri);
+    if (!parentUri) return;
+    setAlbumExporting(true);
+    setAlbumExportProgress({ current: 0, total: toExport.length });
+    try {
+      const { copiedCount, failedCount } = await copyPhotosToNewFolder(
+        toExport.map((p) => ({ uri: p.uri, name: p.name })),
+        parentUri,
+        name,
+        (current, total) => setAlbumExportProgress({ current, total })
+      );
+      if (failedCount === 0) {
+        Alert.alert(
+          'Album créé',
+          `${copiedCount} photo${copiedCount > 1 ? 's' : ''} copiée${copiedCount > 1 ? 's' : ''} dans "${name}". Tes photos d'origine n'ont pas bougé.`
+        );
+      } else {
+        Alert.alert(
+          'Album créé, avec quelques soucis',
+          `${copiedCount} photo${copiedCount > 1 ? 's' : ''} copiée${copiedCount > 1 ? 's' : ''}, mais ${failedCount} n'${failedCount > 1 ? 'ont' : 'a'} pas pu être copiée${failedCount > 1 ? 's' : ''}. Réessaie pour celles qui manquent.`
+        );
+      }
+    } catch (error) {
+      console.warn('Erreur création album', error);
+      Alert.alert('Un souci est survenu', "Je n'ai pas réussi à créer l'album. Réessaie.");
+    } finally {
+      setAlbumExporting(false);
+      setAlbumExportProgress(null);
+    }
   }
 
   /** The "decide" step's three-way mark: keep (the default, clears both), later, or trash. */
@@ -730,6 +789,11 @@ export default function App() {
             faceModelDiagnostic={faceModelDiagnostic}
             onMoveMomentPhotos={moveMomentPhotos}
             onMoveMomentGroup={moveMomentGroup}
+            albumUris={albumUris}
+            onToggleAlbum={toggleAlbum}
+            albumExporting={albumExporting}
+            albumExportProgress={albumExportProgress}
+            onCreateAlbum={handleCreateAlbum}
           />
         )}
 
