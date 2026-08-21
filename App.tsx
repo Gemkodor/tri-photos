@@ -122,6 +122,13 @@ export default function App() {
         const restoredMode = saved.mode && SORT_STEP_ORDER.includes(saved.mode) ? saved.mode : 'duplicates';
         setMode(restoredMode);
         setHasSharpness(restoredMode !== 'duplicates');
+        // A save from before momentGroups was persisted (or the mode wasn't
+        // "moments" at save time) has none - recompute fresh rather than
+        // showing an empty "moments" step for no reason.
+        setMomentGroups(
+          saved.momentGroups ??
+            (restoredMode === 'moments' ? groupByMoments(saved.hashedPhotos, MOMENT_GAP_MS) : [])
+        );
         setScreen('results');
       }
     });
@@ -194,10 +201,12 @@ export default function App() {
       }
 
       const threshold = SORT_STEPS[forMode].defaultThreshold;
+      const freshMomentGroups =
+        forMode === 'moments' ? groupByMoments(hashed, MOMENT_GAP_MS) : momentGroups;
       setHashedPhotos(hashed);
       setHasSharpness(forMode !== 'duplicates');
       if (forMode === 'moments') {
-        setMomentGroups(groupByMoments(hashed, MOMENT_GAP_MS));
+        setMomentGroups(freshMomentGroups);
       }
       setMode(forMode);
       setSimilarityThreshold(threshold);
@@ -211,6 +220,7 @@ export default function App() {
         hashedPhotos: hashed,
         reviewedGroupKeys: [],
         mode: forMode,
+        momentGroups: freshMomentGroups,
       });
     } catch (error) {
       console.warn('Erreur pendant l’analyse', error);
@@ -297,6 +307,7 @@ export default function App() {
         hashedPhotos,
         reviewedGroupKeys: Array.from(reviewedGroupKeys),
         mode,
+        momentGroups,
       });
     }
   }
@@ -335,6 +346,7 @@ export default function App() {
         hashedPhotos,
         reviewedGroupKeys: [],
         mode: newMode,
+        momentGroups,
       });
     }
   }
@@ -350,6 +362,7 @@ export default function App() {
           hashedPhotos,
           reviewedGroupKeys: Array.from(next),
           mode,
+          momentGroups,
         });
       }
       return next;
@@ -423,27 +436,39 @@ export default function App() {
    * different target). A group left empty by the move is dropped.
    */
   function moveMomentPhotos(photoUris: string[], targetGroupId: string | 'new') {
-    setMomentGroups((prev) => {
-      const uriSet = new Set(photoUris);
-      const movedPhotos: HashedPhoto[] = [];
-      const withoutPhotos = prev
-        .map((g) => {
-          const [staying, moving] = [
-            g.photos.filter((p) => !uriSet.has(p.uri)),
-            g.photos.filter((p) => uriSet.has(p.uri)),
-          ];
-          movedPhotos.push(...moving);
-          return { ...g, photos: staying };
-        })
-        .filter((g) => g.photos.length > 0);
-      if (movedPhotos.length === 0) return prev;
-      if (targetGroupId === 'new') {
-        return [...withoutPhotos, { id: `moment-manual-${Date.now()}`, photos: movedPhotos }];
-      }
-      return withoutPhotos.map((g) =>
-        g.id === targetGroupId ? { ...g, photos: [...g.photos, ...movedPhotos] } : g
-      );
-    });
+    const uriSet = new Set(photoUris);
+    const movedPhotos: HashedPhoto[] = [];
+    const withoutPhotos = momentGroups
+      .map((g) => {
+        const [staying, moving] = [
+          g.photos.filter((p) => !uriSet.has(p.uri)),
+          g.photos.filter((p) => uriSet.has(p.uri)),
+        ];
+        movedPhotos.push(...moving);
+        return { ...g, photos: staying };
+      })
+      .filter((g) => g.photos.length > 0);
+    if (movedPhotos.length === 0) return;
+    const next =
+      targetGroupId === 'new'
+        ? [...withoutPhotos, { id: `moment-manual-${Date.now()}`, photos: movedPhotos }]
+        : withoutPhotos.map((g) =>
+            g.id === targetGroupId ? { ...g, photos: [...g.photos, ...movedPhotos] } : g
+          );
+    setMomentGroups(next);
+    // Hand-edits like this one can't be recomputed from scratch on reopen
+    // (unlike every other step's grouping) - has to be saved as-is or
+    // they're gone the moment the app closes.
+    if (lastFolderUri) {
+      saveAnalysis({
+        folderUri: lastFolderUri,
+        similarityThreshold,
+        hashedPhotos,
+        reviewedGroupKeys: Array.from(reviewedGroupKeys),
+        mode,
+        momentGroups: next,
+      });
+    }
   }
 
   async function handleDeleteSelected() {
@@ -491,7 +516,14 @@ export default function App() {
                 }
               }
               const remaining = hashedPhotos.filter((p) => !handledUris.has(p.uri));
+              // A jetée photo still sitting in a "moments" group would show
+              // as a broken thumbnail there (its file has really moved) -
+              // drop it from wherever it was, same as from hashedPhotos.
+              const prunedMomentGroups = momentGroups
+                .map((g) => ({ ...g, photos: g.photos.filter((p) => !handledUris.has(p.uri)) }))
+                .filter((g) => g.photos.length > 0);
               setHashedPhotos(remaining);
+              setMomentGroups(prunedMomentGroups);
               setSelected((prev) => {
                 const next = new Set(prev);
                 handledUris.forEach((uri) => next.delete(uri));
@@ -505,6 +537,7 @@ export default function App() {
                   hashedPhotos: remaining,
                   reviewedGroupKeys: Array.from(reviewedGroupKeys),
                   mode,
+                  momentGroups: prunedMomentGroups,
                 });
               }
               if (failedCount > 0) {

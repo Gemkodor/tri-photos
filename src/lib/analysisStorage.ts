@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { SortMode } from './duplicateGroups';
+import type { DuplicateGroup, SortMode } from './duplicateGroups';
 import type { HashedPhoto } from './perceptualHash';
 
 const ANALYSIS_KEY = 'triPhotos.lastAnalysis.v1';
@@ -10,6 +10,8 @@ export type SavedAnalysis = {
   hashedPhotos: HashedPhoto[];
   reviewedGroupKeys?: string[];
   mode?: SortMode;
+  /** "moments" only: the current grouping, including any hand-edits (moved photos) - unlike every other step's grouping, this one can't be recomputed from scratch without losing those. */
+  momentGroups?: DuplicateGroup[];
 };
 
 export async function getSavedAnalysis(): Promise<SavedAnalysis | null> {
