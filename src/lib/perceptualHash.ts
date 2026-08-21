@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import type { HashWorkerHandle } from '../components/HashWorker';
 import type { ImageFile } from './imageFiles';
+import { extractTimestampFromName } from './photoTimestamp';
 
 export type HashedPhoto = {
   uri: string;
@@ -19,6 +20,8 @@ export type HashedPhoto = {
   sharpness: number;
   /** True when sharpness was measured on a detected face rather than the whole photo. */
   facesFound: boolean;
+  /** Best-effort "when taken" guess (epoch ms) parsed from the file name, or null - see photoTimestamp.ts. */
+  capturedAt: number | null;
 };
 
 const TEMP_DIR = (FileSystem.cacheDirectory ?? '') + 'tri-photos-tmp/';
@@ -121,6 +124,7 @@ export async function hashPhoto(
         hash: metrics.hash,
         sharpness: metrics.sharpness,
         facesFound: metrics.facesFound,
+        capturedAt: extractTimestampFromName(photo.name),
       },
       error: null,
     };

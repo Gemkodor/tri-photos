@@ -13,6 +13,7 @@ import {
 import {
   groupDuplicates,
   groupKey,
+  SAME_SESSION_MAX_GAP_MS,
   SORT_STEP_ORDER,
   SORT_STEPS,
   type SortMode,
@@ -81,8 +82,20 @@ export default function App() {
   const hashWorkerRef = useRef<HashWorkerHandle>(null);
 
   const groups = useMemo(
-    () => groupDuplicates(hashedPhotos, similarityThreshold),
-    [hashedPhotos, similarityThreshold]
+    () =>
+      groupDuplicates(
+        hashedPhotos,
+        similarityThreshold,
+        // Every sorting-part step (similar/blurry/decide/later/final) shares
+        // the one grouping "similar" produced, so the gate has to apply the
+        // same way regardless of which of those is currently showing -
+        // otherwise the very same two photos could count as grouped on one
+        // step and not on another. Never applied to "duplicates" (a
+        // separate part/threshold): a genuine exact copy's file name can
+        // carry a copy/save time completely unrelated to the original shot.
+        mode !== 'duplicates' ? SAME_SESSION_MAX_GAP_MS : undefined
+      ),
+    [hashedPhotos, similarityThreshold, mode]
   );
 
   const trashReminder = useMemo(() => getTrashReminder(trashEntries), [trashEntries]);

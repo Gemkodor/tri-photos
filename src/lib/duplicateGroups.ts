@@ -292,21 +292,43 @@ class UnionFind {
 }
 
 /**
- * Groups photos whose perceptual hashes are within DUPLICATE_DISTANCE_THRESHOLD
- * of each other (transitively). Only groups with 2+ photos are returned.
+ * Same-session safety net for the loose "similar" grouping (not used for
+ * "duplicates", where a genuine copy can have a completely different
+ * file-name timestamp than the original shot): two photos whose names both
+ * parse to a timestamp further apart than this are extremely unlikely to be
+ * the same shooting session, no matter how close their hash lands - this is
+ * what a coincidental hash match between unrelated photos looks like (a
+ * bath photo and an unrelated bathroom photo taken hours or days apart,
+ * confirmed by Flavie). 30 minutes comfortably covers a real burst/session
+ * without also swallowing "unrelated, but similarly lit/composed" photos
+ * from a different moment entirely.
+ */
+export const SAME_SESSION_MAX_GAP_MS = 30 * 60 * 1000;
+
+/**
+ * Groups photos whose perceptual hashes are within `threshold` of each
+ * other (transitively). Only groups with 2+ photos are returned. When
+ * `maxTimeGapMs` is given, two photos are only ever linked if they're
+ * hash-similar *and* (whenever both have a parseable file-name timestamp)
+ * not further apart than that in time.
  */
 export function groupDuplicates(
   photos: HashedPhoto[],
-  threshold: number = DEFAULT_SIMILARITY_THRESHOLD
+  threshold: number = DEFAULT_SIMILARITY_THRESHOLD,
+  maxTimeGapMs?: number
 ): DuplicateGroup[] {
   const packed = photos.map((p) => packHash(p.hash));
   const uf = new UnionFind(photos.length);
 
   for (let i = 0; i < photos.length; i++) {
     for (let j = i + 1; j < photos.length; j++) {
-      if (hammingDistance(packed[i], packed[j]) <= threshold) {
-        uf.union(i, j);
+      if (hammingDistance(packed[i], packed[j]) > threshold) continue;
+      if (maxTimeGapMs !== undefined) {
+        const ta = photos[i].capturedAt;
+        const tb = photos[j].capturedAt;
+        if (ta !== null && tb !== null && Math.abs(ta - tb) > maxTimeGapMs) continue;
       }
+      uf.union(i, j);
     }
   }
 
