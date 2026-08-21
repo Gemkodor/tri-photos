@@ -56,8 +56,8 @@ type Props = {
   onFinishSorting: () => void;
   /** Debug: why face detection did or didn't come up during the last scan. */
   faceModelDiagnostic: string | null;
-  /** "moments" only: moves a photo into another moment group, or 'new' for a fresh group of its own. */
-  onMoveMomentPhoto: (photoUri: string, targetGroupId: string | 'new') => void;
+  /** "moments" only: moves one or more photos into another moment group, or 'new' for a fresh group together. */
+  onMoveMomentPhotos: (photoUris: string[], targetGroupId: string | 'new') => void;
 };
 
 type FlatViewer = { photos: HashedPhoto[]; index: number; title: string };
@@ -85,16 +85,24 @@ export default function ResultsScreen({
   onSwitchMode,
   onFinishSorting,
   faceModelDiagnostic,
-  onMoveMomentPhoto,
+  onMoveMomentPhotos,
 }: Props) {
   const [viewerGroupIndex, setViewerGroupIndex] = useState<number | null>(null);
   const [viewerPhotoIndex, setViewerPhotoIndex] = useState(0);
   const [flatViewer, setFlatViewer] = useState<FlatViewer | null>(null);
-  // "moments" hand-editing: which photo is currently choosing a group to
-  // move to (null = picker closed).
-  const [movePickerFor, setMovePickerFor] = useState<{ photoUri: string; groupId: string } | null>(
-    null
-  );
+  // "moments" hand-editing: photos picked to move together, and whether
+  // the "choose a group" picker is currently open for them.
+  const [moveSelection, setMoveSelection] = useState<Set<string>>(new Set());
+  const [movePickerOpen, setMovePickerOpen] = useState(false);
+
+  function toggleMoveSelection(uri: string) {
+    setMoveSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(uri)) next.delete(uri);
+      else next.add(uri);
+      return next;
+    });
+  }
   const [showReviewed, setShowReviewed] = useState(false);
   const [keepMode, setKeepMode] = useState(false);
   const [kept, setKept] = useState<Set<string>>(new Set());
@@ -715,103 +723,130 @@ export default function ResultsScreen({
             <Text style={styles.instructions}>
               Les photos sont regroupées par moment (quand elles ont été prises), pas par
               ressemblance - même les photos seules ont leur groupe. Pour chaque photo : ❤️ à
-              garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle.
+              garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle. Coche une ou plusieurs photos (le
+              rond en haut à gauche) pour les déplacer ensemble vers un autre moment.
             </Text>
-            {visibleGroups.map((group, groupIndex) => (
-              <View key={group.id} style={styles.groupCard}>
-                <Text style={styles.groupLabel}>
-                  Moment {groupIndex + 1} · {group.photos.length} photo
-                  {group.photos.length > 1 ? 's' : ''}
-                </Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  {group.photos.map((photo) => {
-                    const photoIndex = group.photos.indexOf(photo);
-                    const status = selected.has(photo.uri)
-                      ? 'trash'
-                      : laterUris.has(photo.uri)
-                        ? 'later'
-                        : 'keep';
-                    const photoIsBlurry = isBlurry(photo);
-                    return (
-                      <View key={photo.uri} style={styles.thumbWrapper}>
-                        <Image
-                          source={{ uri: photo.uri }}
-                          style={[
-                            styles.thumb,
-                            photoIsBlurry && status === 'keep' && styles.thumbBlurry,
-                            status === 'trash' && styles.thumbSelected,
-                            status === 'later' && styles.thumbLater,
-                          ]}
-                          contentFit="cover"
-                        />
-                        {status === 'trash' ? (
-                          <View style={styles.trashBadge}>
-                            <Text style={styles.trashBadgeText}>🗑</Text>
-                          </View>
-                        ) : status === 'later' ? (
-                          <View style={styles.laterBadge}>
-                            <Text style={styles.laterBadgeText}>🕐 plus tard</Text>
-                          </View>
-                        ) : (
-                          photoIsBlurry && (
-                            <View style={styles.blurBadge}>
-                              <Text style={styles.blurBadgeText}>🌫 flou</Text>
+            {visibleGroups.map((group, groupIndex) => {
+              const allChecked = group.photos.every((p) => moveSelection.has(p.uri));
+              return (
+                <View key={group.id} style={styles.groupCard}>
+                  <View style={styles.groupHeaderRow}>
+                    <Text style={styles.groupLabel}>
+                      Moment {groupIndex + 1} · {group.photos.length} photo
+                      {group.photos.length > 1 ? 's' : ''}
+                    </Text>
+                    <Pressable
+                      hitSlop={8}
+                      onPress={() =>
+                        setMoveSelection((prev) => {
+                          const next = new Set(prev);
+                          group.photos.forEach((p) => {
+                            if (allChecked) next.delete(p.uri);
+                            else next.add(p.uri);
+                          });
+                          return next;
+                        })
+                      }
+                    >
+                      <Text style={styles.groupSelectLink}>
+                        {allChecked ? 'Tout désélectionner' : 'Tout sélectionner'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {group.photos.map((photo) => {
+                      const photoIndex = group.photos.indexOf(photo);
+                      const status = selected.has(photo.uri)
+                        ? 'trash'
+                        : laterUris.has(photo.uri)
+                          ? 'later'
+                          : 'keep';
+                      const photoIsBlurry = isBlurry(photo);
+                      const isChecked = moveSelection.has(photo.uri);
+                      return (
+                        <View key={photo.uri} style={styles.thumbWrapper}>
+                          <Image
+                            source={{ uri: photo.uri }}
+                            style={[
+                              styles.thumb,
+                              photoIsBlurry && status === 'keep' && styles.thumbBlurry,
+                              status === 'trash' && styles.thumbSelected,
+                              status === 'later' && styles.thumbLater,
+                            ]}
+                            contentFit="cover"
+                          />
+                          <Pressable
+                            style={styles.checkBadge}
+                            hitSlop={8}
+                            onPress={() => toggleMoveSelection(photo.uri)}
+                          >
+                            <View style={[styles.checkCircle, isChecked && styles.checkCircleOn]}>
+                              {isChecked && <Text style={styles.checkCircleText}>✓</Text>}
                             </View>
-                          )
-                        )}
-                        <Pressable
-                          style={styles.magnifyBadge}
-                          hitSlop={8}
-                          onPress={() =>
-                            openFlatViewer(group.photos, photoIndex, `Moment ${groupIndex + 1}`)
-                          }
-                        >
-                          <Text style={styles.magnifyBadgeText}>🔍</Text>
-                        </Pressable>
-                        <View style={styles.statusRow}>
-                          <Pressable
-                            style={[
-                              styles.statusButton,
-                              status === 'keep' && styles.statusButtonActiveKeep,
-                            ]}
-                            hitSlop={4}
-                            onPress={() => onSetPhotoStatus(photo.uri, 'keep')}
-                          >
-                            <Text style={styles.statusButtonText}>❤️</Text>
                           </Pressable>
+                          {status === 'trash' ? (
+                            <View style={styles.trashBadge}>
+                              <Text style={styles.trashBadgeText}>🗑</Text>
+                            </View>
+                          ) : status === 'later' ? (
+                            <View style={styles.laterBadge}>
+                              <Text style={styles.laterBadgeText}>🕐 plus tard</Text>
+                            </View>
+                          ) : (
+                            photoIsBlurry && (
+                              <View style={styles.blurBadge}>
+                                <Text style={styles.blurBadgeText}>🌫 flou</Text>
+                              </View>
+                            )
+                          )}
                           <Pressable
-                            style={[
-                              styles.statusButton,
-                              status === 'later' && styles.statusButtonActiveLater,
-                            ]}
-                            hitSlop={4}
-                            onPress={() => onSetPhotoStatus(photo.uri, 'later')}
+                            style={styles.magnifyBadge}
+                            hitSlop={8}
+                            onPress={() =>
+                              openFlatViewer(group.photos, photoIndex, `Moment ${groupIndex + 1}`)
+                            }
                           >
-                            <Text style={styles.statusButtonText}>🕐</Text>
+                            <Text style={styles.magnifyBadgeText}>🔍</Text>
                           </Pressable>
-                          <Pressable
-                            style={[
-                              styles.statusButton,
-                              status === 'trash' && styles.statusButtonActiveTrash,
-                            ]}
-                            hitSlop={4}
-                            onPress={() => onSetPhotoStatus(photo.uri, 'trash')}
-                          >
-                            <Text style={styles.statusButtonText}>🗑</Text>
-                          </Pressable>
+                          <View style={styles.statusRow}>
+                            <Pressable
+                              style={[
+                                styles.statusButton,
+                                status === 'keep' && styles.statusButtonActiveKeep,
+                              ]}
+                              hitSlop={4}
+                              onPress={() => onSetPhotoStatus(photo.uri, 'keep')}
+                            >
+                              <Text style={styles.statusButtonText}>❤️</Text>
+                            </Pressable>
+                            <Pressable
+                              style={[
+                                styles.statusButton,
+                                status === 'later' && styles.statusButtonActiveLater,
+                              ]}
+                              hitSlop={4}
+                              onPress={() => onSetPhotoStatus(photo.uri, 'later')}
+                            >
+                              <Text style={styles.statusButtonText}>🕐</Text>
+                            </Pressable>
+                            <Pressable
+                              style={[
+                                styles.statusButton,
+                                status === 'trash' && styles.statusButtonActiveTrash,
+                              ]}
+                              hitSlop={4}
+                              onPress={() => onSetPhotoStatus(photo.uri, 'trash')}
+                            >
+                              <Text style={styles.statusButtonText}>🗑</Text>
+                            </Pressable>
+                          </View>
                         </View>
-                        <Pressable
-                          style={styles.moveButton}
-                          onPress={() => setMovePickerFor({ photoUri: photo.uri, groupId: group.id })}
-                        >
-                          <Text style={styles.moveButtonText}>↔️ Déplacer</Text>
-                        </Pressable>
-                      </View>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-            ))}
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              );
+            })}
           </ScrollView>
         )
       ) : groups.length === 0 ? (
@@ -1045,7 +1080,24 @@ export default function ResultsScreen({
         </View>
       )}
 
+      {mode === 'moments' && groups.length > 0 && (
+        <View style={styles.bottomBar}>
+          <Pressable
+            style={[styles.deleteButton, moveSelection.size === 0 && styles.deleteButtonDisabled]}
+            disabled={moveSelection.size === 0}
+            onPress={() => setMovePickerOpen(true)}
+          >
+            <Text style={styles.deleteButtonText}>
+              {moveSelection.size === 0
+                ? 'Coche des photos à déplacer'
+                : `Déplacer ${moveSelection.size} photo${moveSelection.size > 1 ? 's' : ''}`}
+            </Text>
+          </Pressable>
+        </View>
+      )}
+
       {!keepMode &&
+        mode !== 'moments' &&
         (mode === 'final' || mode === 'decide'
           ? allPhotos.length > 0
           : mode === 'blurry'
@@ -1129,33 +1181,39 @@ export default function ResultsScreen({
       </Modal>
 
       <Modal
-        visible={movePickerFor !== null}
+        visible={movePickerOpen}
         animationType="slide"
         transparent
-        onRequestClose={() => setMovePickerFor(null)}
+        onRequestClose={() => setMovePickerOpen(false)}
       >
-        <Pressable style={styles.movePickerBackdrop} onPress={() => setMovePickerFor(null)}>
+        <Pressable style={styles.movePickerBackdrop} onPress={() => setMovePickerOpen(false)}>
           <View style={styles.movePickerSheet}>
-            <Text style={styles.movePickerTitle}>Déplacer cette photo vers…</Text>
-            <ScrollView style={styles.movePickerList}>
-              <Pressable
-                style={styles.movePickerOption}
-                onPress={() => {
-                  if (movePickerFor) onMoveMomentPhoto(movePickerFor.photoUri, 'new');
-                  setMovePickerFor(null);
-                }}
-              >
-                <Text style={styles.movePickerOptionText}>➕ Nouveau groupe séparé</Text>
-              </Pressable>
-              {groups
-                .filter((g) => g.id !== movePickerFor?.groupId)
-                .map((g, i) => {
+            <Text style={styles.movePickerTitle}>
+              Déplacer {moveSelection.size} photo{moveSelection.size > 1 ? 's' : ''} vers…
+            </Text>
+            <ScrollView>
+              <View style={styles.movePickerGrid}>
+                <Pressable
+                  style={styles.movePickerTile}
+                  onPress={() => {
+                    onMoveMomentPhotos(Array.from(moveSelection), 'new');
+                    setMoveSelection(new Set());
+                    setMovePickerOpen(false);
+                  }}
+                >
+                  <View style={styles.movePickerNewTile}>
+                    <Text style={styles.movePickerNewTileText}>➕</Text>
+                  </View>
+                  <Text style={styles.movePickerTileLabel} numberOfLines={2}>
+                    Nouveau groupe séparé
+                  </Text>
+                </Pressable>
+                {groups.map((g, i) => {
                   const first = g.photos[0];
                   const label = first?.capturedAt
                     ? new Date(first.capturedAt).toLocaleString('fr-FR', {
                         day: '2-digit',
                         month: '2-digit',
-                        year: 'numeric',
                         hour: '2-digit',
                         minute: '2-digit',
                       })
@@ -1163,21 +1221,28 @@ export default function ResultsScreen({
                   return (
                     <Pressable
                       key={g.id}
-                      style={styles.movePickerOption}
+                      style={styles.movePickerTile}
                       onPress={() => {
-                        if (movePickerFor) onMoveMomentPhoto(movePickerFor.photoUri, g.id);
-                        setMovePickerFor(null);
+                        onMoveMomentPhotos(Array.from(moveSelection), g.id);
+                        setMoveSelection(new Set());
+                        setMovePickerOpen(false);
                       }}
                     >
-                      <Text style={styles.movePickerOptionText}>
-                        Moment {groups.indexOf(g) + 1} · {label} · {g.photos.length} photo
+                      <Image
+                        source={{ uri: first?.uri }}
+                        style={styles.movePickerThumb}
+                        contentFit="cover"
+                      />
+                      <Text style={styles.movePickerTileLabel} numberOfLines={2}>
+                        Moment {i + 1} · {label} · {g.photos.length} photo
                         {g.photos.length > 1 ? 's' : ''}
                       </Text>
                     </Pressable>
                   );
                 })}
+              </View>
             </ScrollView>
-            <Pressable style={styles.movePickerCancel} onPress={() => setMovePickerFor(null)}>
+            <Pressable style={styles.movePickerCancel} onPress={() => setMovePickerOpen(false)}>
               <Text style={styles.movePickerCancelText}>Annuler</Text>
             </Pressable>
           </View>
@@ -1585,19 +1650,29 @@ const styles = StyleSheet.create({
   statusButtonText: {
     fontSize: 15,
   },
-  moveButton: {
-    marginTop: 6,
-    paddingVertical: 6,
-    borderRadius: 10,
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+  checkBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
   },
-  moveButtonText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.subtleText,
+  checkCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkCircleOn: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkCircleText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   movePickerBackdrop: {
     flex: 1,
@@ -1609,7 +1684,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
-    maxHeight: '70%',
+    maxHeight: '75%',
   },
   movePickerTitle: {
     fontSize: 16,
@@ -1617,17 +1692,42 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 12,
   },
-  movePickerList: {
+  movePickerGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     marginBottom: 12,
   },
-  movePickerOption: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+  movePickerTile: {
+    width: 96,
+    marginRight: 10,
+    marginBottom: 14,
+    alignItems: 'center',
   },
-  movePickerOptionText: {
-    fontSize: 14,
-    color: colors.text,
+  movePickerThumb: {
+    width: 96,
+    height: 96,
+    borderRadius: 12,
+    backgroundColor: colors.border,
+  },
+  movePickerNewTile: {
+    width: 96,
+    height: 96,
+    borderRadius: 12,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  movePickerNewTileText: {
+    fontSize: 28,
+  },
+  movePickerTileLabel: {
+    fontSize: 11,
+    color: colors.subtleText,
+    textAlign: 'center',
+    marginTop: 6,
   },
   movePickerCancel: {
     alignItems: 'center',

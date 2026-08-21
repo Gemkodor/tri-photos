@@ -415,29 +415,33 @@ export default function App() {
   }
 
   /**
-   * Hand-editing for "moments": moves a photo out of whatever group it's
-   * currently in and into `targetGroupId` (or, with 'new', into a brand
-   * new group of its own - the same action covers both "this one doesn't
-   * belong with the rest of this moment" and "pull an undated photo into
-   * the moment it actually belongs to", just picking a different target).
-   * A group left empty by the move is dropped.
+   * Hand-editing for "moments": moves one or more photos out of whatever
+   * group each is currently in and into `targetGroupId` (or, with 'new',
+   * into a single brand new group together - the same action covers both
+   * "these don't belong with the rest of this moment" and "pull undated
+   * photos into the moment they actually belong to", just picking a
+   * different target). A group left empty by the move is dropped.
    */
-  function moveMomentPhoto(photoUri: string, targetGroupId: string | 'new') {
+  function moveMomentPhotos(photoUris: string[], targetGroupId: string | 'new') {
     setMomentGroups((prev) => {
-      let movedPhoto: HashedPhoto | undefined;
-      const withoutPhoto = prev
+      const uriSet = new Set(photoUris);
+      const movedPhotos: HashedPhoto[] = [];
+      const withoutPhotos = prev
         .map((g) => {
-          const photo = g.photos.find((p) => p.uri === photoUri);
-          if (photo) movedPhoto = photo;
-          return { ...g, photos: g.photos.filter((p) => p.uri !== photoUri) };
+          const [staying, moving] = [
+            g.photos.filter((p) => !uriSet.has(p.uri)),
+            g.photos.filter((p) => uriSet.has(p.uri)),
+          ];
+          movedPhotos.push(...moving);
+          return { ...g, photos: staying };
         })
         .filter((g) => g.photos.length > 0);
-      if (!movedPhoto) return prev;
+      if (movedPhotos.length === 0) return prev;
       if (targetGroupId === 'new') {
-        return [...withoutPhoto, { id: `moment-manual-${Date.now()}`, photos: [movedPhoto] }];
+        return [...withoutPhotos, { id: `moment-manual-${Date.now()}`, photos: movedPhotos }];
       }
-      return withoutPhoto.map((g) =>
-        g.id === targetGroupId ? { ...g, photos: [...g.photos, movedPhoto as HashedPhoto] } : g
+      return withoutPhotos.map((g) =>
+        g.id === targetGroupId ? { ...g, photos: [...g.photos, ...movedPhotos] } : g
       );
     });
   }
@@ -655,7 +659,7 @@ export default function App() {
             onSwitchMode={switchMode}
             onFinishSorting={handleFinishSorting}
             faceModelDiagnostic={faceModelDiagnostic}
-            onMoveMomentPhoto={moveMomentPhoto}
+            onMoveMomentPhotos={moveMomentPhotos}
           />
         )}
 
