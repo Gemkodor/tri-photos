@@ -9,18 +9,27 @@ import type { HashedPhoto } from './perceptualHash';
  * Part "duplicates" is a single, deliberately minimal, fast pass that just
  * catches exact duplicates (fixed at 100% - no wiggle room, no face
  * detection) - useful on a big folder with lots of subfolders. Part
- * "sorting" is a second, deeper pass with three steps you can move between
+ * "sorting" is a second, deeper pass with five steps you can move between
  * freely: "similar" groups photos from the same shooting session (burst
  * shots) and marks the blurry ones within each group so both jobs happen at
  * once, "blurry" is next with just the blurry photos that didn't land in
  * any group (nothing to compare them against there, so they need their own
- * pass), and "final" is a last pass over every photo still in the folder,
- * still marking blurry ones.
+ * pass), "decide" is a first pass over every remaining photo where each one
+ * gets marked keep/later/trash, "later" gathers just the ones marked
+ * "later" for a focused second look, and "final" is a last pass over every
+ * photo still in the folder, still marking blurry ones.
  */
-export type SortMode = 'duplicates' | 'similar' | 'blurry' | 'final';
+export type SortMode = 'duplicates' | 'similar' | 'blurry' | 'decide' | 'later' | 'final';
 export type SortPart = 'duplicates' | 'sorting';
 
-export const SORT_STEP_ORDER: SortMode[] = ['duplicates', 'similar', 'blurry', 'final'];
+export const SORT_STEP_ORDER: SortMode[] = [
+  'duplicates',
+  'similar',
+  'blurry',
+  'decide',
+  'later',
+  'final',
+];
 export const SORT_PART_ORDER: SortPart[] = ['duplicates', 'sorting'];
 
 export function partOf(mode: SortMode): SortPart {
@@ -29,7 +38,9 @@ export function partOf(mode: SortMode): SortPart {
 
 /** The steps belonging to the same part as `mode` - used for the step nav, so it never offers a cross-part jump. */
 export function partSteps(mode: SortMode): SortMode[] {
-  return partOf(mode) === 'duplicates' ? ['duplicates'] : ['similar', 'blurry', 'final'];
+  return partOf(mode) === 'duplicates'
+    ? ['duplicates']
+    : ['similar', 'blurry', 'decide', 'later', 'final'];
 }
 
 /**
@@ -115,6 +126,19 @@ export const SORT_STEPS: Record<
     shortTitle: 'Floues',
     description:
       "Les photos qui semblent floues mais n'ont pas de photo semblable à côté pour comparer - passe-les en revue une par une.",
+    defaultThreshold: 0,
+  },
+  decide: {
+    title: 'Garder, plus tard ou poubelle',
+    shortTitle: 'Décider',
+    description:
+      "Marque chaque photo restante : à garder, à revoir plus tard, ou à la poubelle - pas besoin de trancher tout de suite pour celles qui hésitent.",
+    defaultThreshold: 0,
+  },
+  later: {
+    title: 'À revoir plus tard',
+    shortTitle: 'Plus tard',
+    description: "Juste les photos que tu as mises de côté pour y revenir - le moment d'en décider.",
     defaultThreshold: 0,
   },
   final: {

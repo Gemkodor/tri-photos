@@ -38,6 +38,8 @@ type Props = {
   allPhotos: HashedPhoto[];
   groups: DuplicateGroup[];
   selected: Set<string>;
+  laterUris: Set<string>;
+  onSetPhotoStatus: (uri: string, status: 'keep' | 'later' | 'trash') => void;
   deleting: boolean;
   similarityThreshold: number;
   trashCount: number;
@@ -64,6 +66,8 @@ export default function ResultsScreen({
   allPhotos,
   groups,
   selected,
+  laterUris,
+  onSetPhotoStatus,
   deleting,
   similarityThreshold,
   trashCount,
@@ -127,6 +131,10 @@ export default function ResultsScreen({
   const standaloneBlurryPhotos = useMemo(
     () => blurryPhotos.filter((p) => !groupByUri.has(p.uri)),
     [blurryPhotos, groupByUri]
+  );
+  const laterPhotos = useMemo(
+    () => allPhotos.filter((p) => laterUris.has(p.uri)),
+    [allPhotos, laterUris]
   );
 
   function isBlurry(photo: HashedPhoto): boolean {
@@ -503,6 +511,179 @@ export default function ResultsScreen({
             </View>
           </ScrollView>
         )
+      ) : mode === 'decide' ? (
+        allPhotos.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>Il n'y a plus de photo dans ce dossier.</Text>
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.list}>
+            <Text style={styles.instructions}>
+              Pour chaque photo : ❤️ à garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle. Touche la
+              loupe pour voir en grand.
+            </Text>
+            {nextMode && (
+              <View style={styles.bulkActionsRow}>
+                <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
+                  <Text style={styles.selectAllButtonText}>
+                    ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+            <View style={styles.blurGrid}>
+              {allPhotos.map((photo, index) => {
+                const status = selected.has(photo.uri) ? 'trash' : laterUris.has(photo.uri) ? 'later' : 'keep';
+                const photoIsBlurry = isBlurry(photo);
+                return (
+                  <View key={photo.uri} style={styles.blurGridItem}>
+                    <Image
+                      source={{ uri: photo.uri }}
+                      style={[
+                        styles.thumb,
+                        photoIsBlurry && status === 'keep' && styles.thumbBlurry,
+                        status === 'trash' && styles.thumbSelected,
+                        status === 'later' && styles.thumbLater,
+                      ]}
+                      contentFit="cover"
+                    />
+                    {status === 'trash' ? (
+                      <View style={styles.trashBadge}>
+                        <Text style={styles.trashBadgeText}>🗑</Text>
+                      </View>
+                    ) : status === 'later' ? (
+                      <View style={styles.laterBadge}>
+                        <Text style={styles.laterBadgeText}>🕐 plus tard</Text>
+                      </View>
+                    ) : (
+                      photoIsBlurry && (
+                        <View style={styles.blurBadge}>
+                          <Text style={styles.blurBadgeText}>🌫 flou</Text>
+                        </View>
+                      )
+                    )}
+                    <Pressable
+                      style={styles.magnifyBadge}
+                      hitSlop={8}
+                      onPress={() => openFlatViewer(allPhotos, index, 'Garder, plus tard ou poubelle')}
+                    >
+                      <Text style={styles.magnifyBadgeText}>🔍</Text>
+                    </Pressable>
+                    <View style={styles.statusRow}>
+                      <Pressable
+                        style={[styles.statusButton, status === 'keep' && styles.statusButtonActiveKeep]}
+                        hitSlop={4}
+                        onPress={() => onSetPhotoStatus(photo.uri, 'keep')}
+                      >
+                        <Text style={styles.statusButtonText}>❤️</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.statusButton, status === 'later' && styles.statusButtonActiveLater]}
+                        hitSlop={4}
+                        onPress={() => onSetPhotoStatus(photo.uri, 'later')}
+                      >
+                        <Text style={styles.statusButtonText}>🕐</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.statusButton, status === 'trash' && styles.statusButtonActiveTrash]}
+                        hitSlop={4}
+                        onPress={() => onSetPhotoStatus(photo.uri, 'trash')}
+                      >
+                        <Text style={styles.statusButtonText}>🗑</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+        )
+      ) : mode === 'later' ? (
+        laterPhotos.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>Rien à revoir pour l'instant ! 🎉</Text>
+            {nextMode && (
+              <Pressable
+                onPress={() => onSwitchMode(nextMode)}
+                hitSlop={8}
+                style={styles.reviewAgainLink}
+              >
+                <Text style={styles.selectAllButtonText}>
+                  ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.list}>
+            <Text style={styles.instructions}>
+              Les photos que tu as mises de côté pour plus tard. Choisis maintenant : ❤️ à garder ou
+              🗑 à la poubelle.
+            </Text>
+            {nextMode && (
+              <View style={styles.bulkActionsRow}>
+                <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
+                  <Text style={styles.selectAllButtonText}>
+                    ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+            <View style={styles.blurGrid}>
+              {laterPhotos.map((photo, index) => {
+                const isSelected = selected.has(photo.uri);
+                const photoIsBlurry = isBlurry(photo);
+                return (
+                  <View key={photo.uri} style={styles.blurGridItem}>
+                    <Image
+                      source={{ uri: photo.uri }}
+                      style={[
+                        styles.thumb,
+                        photoIsBlurry && !isSelected && styles.thumbBlurry,
+                        isSelected && styles.thumbSelected,
+                      ]}
+                      contentFit="cover"
+                    />
+                    {isSelected ? (
+                      <View style={styles.trashBadge}>
+                        <Text style={styles.trashBadgeText}>🗑</Text>
+                      </View>
+                    ) : (
+                      photoIsBlurry && (
+                        <View style={styles.blurBadge}>
+                          <Text style={styles.blurBadgeText}>🌫 flou</Text>
+                        </View>
+                      )
+                    )}
+                    <Pressable
+                      style={styles.magnifyBadge}
+                      hitSlop={8}
+                      onPress={() => openFlatViewer(laterPhotos, index, 'À revoir plus tard')}
+                    >
+                      <Text style={styles.magnifyBadgeText}>🔍</Text>
+                    </Pressable>
+                    <View style={styles.statusRow}>
+                      <Pressable
+                        style={styles.statusButton}
+                        hitSlop={4}
+                        onPress={() => onSetPhotoStatus(photo.uri, 'keep')}
+                      >
+                        <Text style={styles.statusButtonText}>❤️</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.statusButton, isSelected && styles.statusButtonActiveTrash]}
+                        hitSlop={4}
+                        onPress={() => onSetPhotoStatus(photo.uri, 'trash')}
+                      >
+                        <Text style={styles.statusButtonText}>🗑</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+        )
       ) : groups.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
@@ -735,11 +916,13 @@ export default function ResultsScreen({
       )}
 
       {!keepMode &&
-        (mode === 'final'
+        (mode === 'final' || mode === 'decide'
           ? allPhotos.length > 0
           : mode === 'blurry'
             ? standaloneBlurryPhotos.length > 0
-            : groups.length > 0) && (
+            : mode === 'later'
+              ? laterPhotos.length > 0
+              : groups.length > 0) && (
           <View style={styles.bottomBar}>
             <Pressable
               style={[styles.deleteButton, selectedCount === 0 && styles.deleteButtonDisabled]}
@@ -1082,6 +1265,9 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: 'rgba(107,107,123,0.9)',
   },
+  thumbLater: {
+    opacity: 0.6,
+  },
   blurGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1168,6 +1354,50 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 12,
     color: colors.subtleText,
+  },
+  laterBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    backgroundColor: colors.badge,
+  },
+  laterBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    marginTop: 6,
+  },
+  statusButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  statusButtonActiveKeep: {
+    borderColor: colors.success,
+    backgroundColor: '#E7F7EE',
+  },
+  statusButtonActiveLater: {
+    borderColor: colors.badge,
+    backgroundColor: '#FFF4E0',
+  },
+  statusButtonActiveTrash: {
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerBackground,
+  },
+  statusButtonText: {
+    fontSize: 15,
   },
   bottomBar: {
     position: 'absolute',

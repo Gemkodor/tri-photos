@@ -63,6 +63,10 @@ export default function App() {
     SORT_STEPS.duplicates.defaultThreshold
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // "Voir plus tard" marks from the "decide" step - a photo can be in
+  // `selected` (poubelle) or in here (later), never both; neither means
+  // "garder" (the default, nothing to do for those).
+  const [laterUris, setLaterUris] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([]);
   // Shown as a progress bar on the trash screen during "Tout ranger"/"Tout
@@ -174,6 +178,7 @@ export default function App() {
       setMode(forMode);
       setSimilarityThreshold(threshold);
       setSelected(new Set());
+      setLaterUris(new Set());
       setReviewedGroupKeys(new Set());
       setScreen('results');
       await saveAnalysis({
@@ -294,7 +299,10 @@ export default function App() {
         : similarityThreshold;
     setMode(newMode);
     setSimilarityThreshold(threshold);
-    setSelected(new Set());
+    // Not resetting `selected`/`laterUris` here: a photo marked for the
+    // corbeille or "voir plus tard" on one step (especially "decide", whose
+    // whole point is to carry marks into "later") should still be marked
+    // that way after moving to another step, not silently forgotten.
     setReviewedGroupKeys(new Set());
     if (lastFolderUri) {
       saveAnalysis({
@@ -334,12 +342,50 @@ export default function App() {
       }
       return next;
     });
+    // A photo just marked for the corbeille was presumably "voir plus tard"
+    // no longer - the decision has been made.
+    setLaterUris((prev) => {
+      if (!prev.has(uri)) return prev;
+      const next = new Set(prev);
+      next.delete(uri);
+      return next;
+    });
   }
 
   function selectExceptBest(uris: string[]) {
     setSelected((prev) => {
       const next = new Set(prev);
       uris.forEach((uri) => next.add(uri));
+      return next;
+    });
+    setLaterUris((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      uris.forEach((uri) => {
+        if (next.delete(uri)) changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }
+
+  /** The "decide" step's three-way mark: keep (the default, clears both), later, or trash. */
+  function setPhotoStatus(uri: string, status: 'keep' | 'later' | 'trash') {
+    setSelected((prev) => {
+      const has = prev.has(uri);
+      const shouldHave = status === 'trash';
+      if (has === shouldHave) return prev;
+      const next = new Set(prev);
+      if (shouldHave) next.add(uri);
+      else next.delete(uri);
+      return next;
+    });
+    setLaterUris((prev) => {
+      const has = prev.has(uri);
+      const shouldHave = status === 'later';
+      if (has === shouldHave) return prev;
+      const next = new Set(prev);
+      if (shouldHave) next.add(uri);
+      else next.delete(uri);
       return next;
     });
   }
@@ -540,6 +586,8 @@ export default function App() {
             allPhotos={hashedPhotos}
             groups={groups}
             selected={selected}
+            laterUris={laterUris}
+            onSetPhotoStatus={setPhotoStatus}
             deleting={deleting}
             similarityThreshold={similarityThreshold}
             trashCount={trashEntries.length}
