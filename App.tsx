@@ -430,35 +430,71 @@ export default function App() {
   /**
    * Hand-editing for "moments": moves one or more photos out of whatever
    * group each is currently in and into `targetGroupId` (or, with 'new',
-   * into a single brand new group together - the same action covers both
-   * "these don't belong with the rest of this moment" and "pull undated
-   * photos into the moment they actually belong to", just picking a
-   * different target). A group left empty by the move is dropped.
+   * into a single brand new group together, placed right after the group
+   * they were split out of - not at the end of the whole list, which would
+   * make it hard to find - the same action covers both "these don't belong
+   * with the rest of this moment" and "pull undated photos into the moment
+   * they actually belong to", just picking a different target). A group
+   * left empty by the move is dropped.
    */
   function moveMomentPhotos(photoUris: string[], targetGroupId: string | 'new') {
     const uriSet = new Set(photoUris);
+    const sourceGroupId = momentGroups.find((g) => g.photos.some((p) => uriSet.has(p.uri)))?.id;
+
     const movedPhotos: HashedPhoto[] = [];
-    const withoutPhotos = momentGroups
-      .map((g) => {
-        const [staying, moving] = [
-          g.photos.filter((p) => !uriSet.has(p.uri)),
-          g.photos.filter((p) => uriSet.has(p.uri)),
-        ];
-        movedPhotos.push(...moving);
-        return { ...g, photos: staying };
-      })
-      .filter((g) => g.photos.length > 0);
+    const withoutPhotos: DuplicateGroup[] = [];
+    // Where, within withoutPhotos, the source group ended up (or, if it was
+    // emptied out entirely and dropped, where it *would* still be) - the
+    // new split-off group is inserted right after this position.
+    let insertAfterIndex = -1;
+
+    for (const g of momentGroups) {
+      const staying = g.photos.filter((p) => !uriSet.has(p.uri));
+      const moving = g.photos.filter((p) => uriSet.has(p.uri));
+      movedPhotos.push(...moving);
+      if (staying.length > 0) {
+        withoutPhotos.push({ ...g, photos: staying });
+        if (g.id === sourceGroupId) insertAfterIndex = withoutPhotos.length - 1;
+      } else if (g.id === sourceGroupId) {
+        insertAfterIndex = withoutPhotos.length - 1;
+      }
+    }
     if (movedPhotos.length === 0) return;
-    const next =
-      targetGroupId === 'new'
-        ? [...withoutPhotos, { id: `moment-manual-${Date.now()}`, photos: movedPhotos }]
-        : withoutPhotos.map((g) =>
-            g.id === targetGroupId ? { ...g, photos: [...g.photos, ...movedPhotos] } : g
-          );
+
+    let next: DuplicateGroup[];
+    if (targetGroupId === 'new') {
+      const newGroup = { id: `moment-manual-${Date.now()}`, photos: movedPhotos };
+      const insertAt = insertAfterIndex + 1;
+      next = [...withoutPhotos.slice(0, insertAt), newGroup, ...withoutPhotos.slice(insertAt)];
+    } else {
+      next = withoutPhotos.map((g) =>
+        g.id === targetGroupId ? { ...g, photos: [...g.photos, ...movedPhotos] } : g
+      );
+    }
     setMomentGroups(next);
     // Hand-edits like this one can't be recomputed from scratch on reopen
     // (unlike every other step's grouping) - has to be saved as-is or
     // they're gone the moment the app closes.
+    if (lastFolderUri) {
+      saveAnalysis({
+        folderUri: lastFolderUri,
+        similarityThreshold,
+        hashedPhotos,
+        reviewedGroupKeys: Array.from(reviewedGroupKeys),
+        mode,
+        momentGroups: next,
+      });
+    }
+  }
+
+  /** Nudges a "moments" group one spot up or down in the list, for easy manual reordering. */
+  function moveMomentGroup(groupId: string, direction: 'up' | 'down') {
+    const index = momentGroups.findIndex((g) => g.id === groupId);
+    const swapWith = direction === 'up' ? index - 1 : index + 1;
+    if (index === -1 || swapWith < 0 || swapWith >= momentGroups.length) return;
+    const next = [...momentGroups];
+    [next[index], next[swapWith]] = [next[swapWith], next[index]];
+    setMomentGroups(next);
     if (lastFolderUri) {
       saveAnalysis({
         folderUri: lastFolderUri,
@@ -693,6 +729,7 @@ export default function App() {
             onFinishSorting={handleFinishSorting}
             faceModelDiagnostic={faceModelDiagnostic}
             onMoveMomentPhotos={moveMomentPhotos}
+            onMoveMomentGroup={moveMomentGroup}
           />
         )}
 

@@ -58,6 +58,8 @@ type Props = {
   faceModelDiagnostic: string | null;
   /** "moments" only: moves one or more photos into another moment group, or 'new' for a fresh group together. */
   onMoveMomentPhotos: (photoUris: string[], targetGroupId: string | 'new') => void;
+  /** "moments" only: nudges a group up or down in the list. */
+  onMoveMomentGroup: (groupId: string, direction: 'up' | 'down') => void;
 };
 
 type FlatViewer = { photos: HashedPhoto[]; index: number; title: string };
@@ -86,6 +88,7 @@ export default function ResultsScreen({
   onFinishSorting,
   faceModelDiagnostic,
   onMoveMomentPhotos,
+  onMoveMomentGroup,
 }: Props) {
   const [viewerGroupIndex, setViewerGroupIndex] = useState<number | null>(null);
   const [viewerPhotoIndex, setViewerPhotoIndex] = useState(0);
@@ -739,23 +742,53 @@ export default function ResultsScreen({
                       Moment {groupIndex + 1} · {group.photos.length} photo
                       {group.photos.length > 1 ? 's' : ''}
                     </Text>
-                    <Pressable
-                      hitSlop={8}
-                      onPress={() =>
-                        setMoveSelection((prev) => {
-                          const next = new Set(prev);
-                          group.photos.forEach((p) => {
-                            if (allChecked) next.delete(p.uri);
-                            else next.add(p.uri);
-                          });
-                          return next;
-                        })
-                      }
-                    >
-                      <Text style={styles.groupSelectLink}>
-                        {allChecked ? 'Tout désélectionner' : 'Tout sélectionner'}
-                      </Text>
-                    </Pressable>
+                    <View style={styles.groupHeaderLinks}>
+                      <Pressable
+                        hitSlop={8}
+                        disabled={groupIndex === 0}
+                        onPress={() => onMoveMomentGroup(group.id, 'up')}
+                      >
+                        <Text
+                          style={[
+                            styles.reorderArrow,
+                            groupIndex === 0 && styles.reorderArrowDisabled,
+                          ]}
+                        >
+                          ▲
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        hitSlop={8}
+                        disabled={groupIndex === visibleGroups.length - 1}
+                        onPress={() => onMoveMomentGroup(group.id, 'down')}
+                      >
+                        <Text
+                          style={[
+                            styles.reorderArrow,
+                            groupIndex === visibleGroups.length - 1 && styles.reorderArrowDisabled,
+                          ]}
+                        >
+                          ▼
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        hitSlop={8}
+                        onPress={() =>
+                          setMoveSelection((prev) => {
+                            const next = new Set(prev);
+                            group.photos.forEach((p) => {
+                              if (allChecked) next.delete(p.uri);
+                              else next.add(p.uri);
+                            });
+                            return next;
+                          })
+                        }
+                      >
+                        <Text style={styles.groupSelectLink}>
+                          {allChecked ? 'Tout désélectionner' : 'Tout sélectionner'}
+                        </Text>
+                      </Pressable>
+                    </View>
                   </View>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     {group.photos.map((photo) => {
@@ -1499,6 +1532,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.primary,
     marginLeft: 12,
+  },
+  reorderArrow: {
+    fontSize: 15,
+    color: colors.primary,
+    marginLeft: 10,
+  },
+  reorderArrowDisabled: {
+    color: colors.border,
   },
   thumbWrapper: {
     marginRight: 10,
