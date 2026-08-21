@@ -807,9 +807,7 @@ export default function ResultsScreen({
                           <Pressable
                             style={styles.magnifyBadge}
                             hitSlop={8}
-                            onPress={() =>
-                              openFlatViewer(group.photos, photoIndex, `Moment ${groupIndex + 1}`)
-                            }
+                            onPress={() => openGroupViewer(groupIndex, photoIndex)}
                           >
                             <Text style={styles.magnifyBadgeText}>🔍</Text>
                           </Pressable>
@@ -1145,7 +1143,7 @@ export default function ResultsScreen({
             onToggleSelect={onToggleSelect}
             onClose={() => setViewerGroupIndex(null)}
             showGroupControls
-            groupLabel={`Groupe ${viewerGroupIndex + 1} / ${visibleGroups.length}`}
+            groupLabel={`${mode === 'moments' ? 'Moment' : 'Groupe'} ${viewerGroupIndex + 1} / ${visibleGroups.length}`}
             starReason={bestPhotoReason(viewerGroup)}
             blurryUris={blurryUris}
             isGroupReviewed={reviewedGroupKeys.has(groupKey(viewerGroup))}
