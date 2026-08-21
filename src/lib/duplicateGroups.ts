@@ -17,10 +17,21 @@ import type { HashedPhoto } from './perceptualHash';
  * pass), "decide" is a first pass over every remaining photo where each one
  * gets marked keep/later/trash, "later" gathers just the ones marked
  * "later" for a focused second look, and "final" is a last pass over every
- * photo still in the folder, still marking blurry ones.
+ * photo still in the folder, still marking blurry ones. Part "moments" is a
+ * third, independent pass that groups every photo purely by *when* it was
+ * taken (not what it looks like) - even a single photo taken well apart
+ * from any other gets its own group of one - with blur marked and the same
+ * keep/later/trash choice as "decide", all in one single step.
  */
-export type SortMode = 'duplicates' | 'similar' | 'blurry' | 'decide' | 'later' | 'final';
-export type SortPart = 'duplicates' | 'sorting';
+export type SortMode =
+  | 'duplicates'
+  | 'similar'
+  | 'blurry'
+  | 'decide'
+  | 'later'
+  | 'final'
+  | 'moments';
+export type SortPart = 'duplicates' | 'sorting' | 'moments';
 
 export const SORT_STEP_ORDER: SortMode[] = [
   'duplicates',
@@ -29,18 +40,22 @@ export const SORT_STEP_ORDER: SortMode[] = [
   'decide',
   'later',
   'final',
+  'moments',
 ];
-export const SORT_PART_ORDER: SortPart[] = ['duplicates', 'sorting'];
+export const SORT_PART_ORDER: SortPart[] = ['duplicates', 'sorting', 'moments'];
 
 export function partOf(mode: SortMode): SortPart {
-  return mode === 'duplicates' ? 'duplicates' : 'sorting';
+  if (mode === 'duplicates') return 'duplicates';
+  if (mode === 'moments') return 'moments';
+  return 'sorting';
 }
 
 /** The steps belonging to the same part as `mode` - used for the step nav, so it never offers a cross-part jump. */
 export function partSteps(mode: SortMode): SortMode[] {
-  return partOf(mode) === 'duplicates'
-    ? ['duplicates']
-    : ['similar', 'blurry', 'decide', 'later', 'final'];
+  const part = partOf(mode);
+  if (part === 'duplicates') return ['duplicates'];
+  if (part === 'moments') return ['moments'];
+  return ['similar', 'blurry', 'decide', 'later', 'final'];
 }
 
 /**
@@ -90,6 +105,12 @@ export const SORT_PARTS: Record<
     description:
       "Regroupe les photos d'une même séance, repère les floues sans groupe, puis une dernière vérification de tout le dossier avant de terminer.",
     entryMode: 'similar',
+  },
+  moments: {
+    title: 'Tri par moments',
+    description:
+      "Regroupe toutes les photos par moment (quand elles ont été prises), sans regarder si elles se ressemblent - pour trier chronologiquement plutôt que par similarité.",
+    entryMode: 'moments',
   },
 };
 
@@ -146,6 +167,13 @@ export const SORT_STEPS: Record<
     shortTitle: 'Vérification',
     description:
       'Repasse en revue toutes les photos qui restent dans le dossier (les floues restent grisées), une dernière fois avant de terminer.',
+    defaultThreshold: 0,
+  },
+  moments: {
+    title: 'Tri par moments',
+    shortTitle: 'Moments',
+    description:
+      "Regroupe toutes les photos par moment plutôt que par ressemblance - marque les floues, et choisis pour chacune : garder, plus tard, ou poubelle.",
     defaultThreshold: 0,
   },
 };
@@ -349,6 +377,51 @@ export function groupDuplicates(
     group.sort(bestPhotoFirst);
     groups.push({ id: `group-${root}`, photos: group });
   }
+  return groups;
+}
+
+/** How close together (by file-name timestamp) photos need to be to count as the same "moment" - tighter than the "similar" safety net since this is meant to capture one specific burst of activity, not a whole loose session. */
+export const MOMENT_GAP_MS = 10 * 60 * 1000;
+
+/**
+ * Groups every photo by *when* it was taken (see photoTimestamp.ts),
+ * regardless of what it looks like - a "moment" is a run of photos whose
+ * file-name timestamps are never more than `maxGapMs` apart from the next
+ * one in time order. Unlike groupDuplicates, singleton groups are kept
+ * (every photo lands in some moment, even one entirely on its own) and
+ * photos with no parseable timestamp each get their own group, since
+ * there's nothing to place them next to with any confidence.
+ */
+export function groupByMoments(photos: HashedPhoto[], maxGapMs: number): DuplicateGroup[] {
+  const withTime = photos
+    .filter((p) => p.capturedAt !== null)
+    .sort((a, b) => (a.capturedAt as number) - (b.capturedAt as number));
+  const withoutTime = photos.filter((p) => p.capturedAt === null);
+
+  const groups: DuplicateGroup[] = [];
+  let current: HashedPhoto[] = [];
+  let groupIndex = 0;
+
+  function flush() {
+    if (current.length === 0) return;
+    current.sort(bestPhotoFirst);
+    groups.push({ id: `moment-${groupIndex++}`, photos: current });
+    current = [];
+  }
+
+  for (const photo of withTime) {
+    const last = current[current.length - 1];
+    if (last && (photo.capturedAt as number) - (last.capturedAt as number) > maxGapMs) {
+      flush();
+    }
+    current.push(photo);
+  }
+  flush();
+
+  for (const photo of withoutTime) {
+    groups.push({ id: `moment-${groupIndex++}`, photos: [photo] });
+  }
+
   return groups;
 }
 

@@ -106,7 +106,7 @@ export default function ResultsScreen({
   }, [mode]);
 
   const selectedCount = selected.size;
-  const hasGroups = mode === 'duplicates' || mode === 'similar';
+  const hasGroups = mode === 'duplicates' || mode === 'similar' || mode === 'moments';
   const currentPartSteps = partSteps(mode);
 
   // Blur is judged two ways: relative to a photo's own group (catches a
@@ -247,6 +247,19 @@ export default function ResultsScreen({
       return standaloneBlurryPhotos.length === 0
         ? 'Aucune photo floue sans groupe'
         : `${standaloneBlurryPhotos.length} photo${standaloneBlurryPhotos.length > 1 ? 's' : ''} floue${standaloneBlurryPhotos.length > 1 ? 's' : ''} sans groupe`;
+    }
+    if (mode === 'decide') {
+      return `${allPhotos.length} photo${allPhotos.length > 1 ? 's' : ''} à trier`;
+    }
+    if (mode === 'later') {
+      return laterPhotos.length === 0
+        ? 'Rien à revoir pour l’instant'
+        : `${laterPhotos.length} photo${laterPhotos.length > 1 ? 's' : ''} à revoir`;
+    }
+    if (mode === 'moments') {
+      return groups.length === 0
+        ? 'Aucune photo'
+        : `${groups.length} moment${groups.length > 1 ? 's' : ''}`;
     }
     if (groups.length === 0) return 'Aucun doublon trouvé';
     const noun = mode === 'duplicates' ? 'identiques' : 'semblables';
@@ -682,6 +695,109 @@ export default function ResultsScreen({
                 );
               })}
             </View>
+          </ScrollView>
+        )
+      ) : mode === 'moments' ? (
+        groups.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>Il n'y a plus de photo dans ce dossier.</Text>
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.list}>
+            <Text style={styles.instructions}>
+              Les photos sont regroupées par moment (quand elles ont été prises), pas par
+              ressemblance - même les photos seules ont leur groupe. Pour chaque photo : ❤️ à
+              garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle.
+            </Text>
+            {visibleGroups.map((group, groupIndex) => (
+              <View key={group.id} style={styles.groupCard}>
+                <Text style={styles.groupLabel}>
+                  Moment {groupIndex + 1} · {group.photos.length} photo
+                  {group.photos.length > 1 ? 's' : ''}
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {group.photos.map((photo) => {
+                    const photoIndex = group.photos.indexOf(photo);
+                    const status = selected.has(photo.uri)
+                      ? 'trash'
+                      : laterUris.has(photo.uri)
+                        ? 'later'
+                        : 'keep';
+                    const photoIsBlurry = isBlurry(photo);
+                    return (
+                      <View key={photo.uri} style={styles.thumbWrapper}>
+                        <Image
+                          source={{ uri: photo.uri }}
+                          style={[
+                            styles.thumb,
+                            photoIsBlurry && status === 'keep' && styles.thumbBlurry,
+                            status === 'trash' && styles.thumbSelected,
+                            status === 'later' && styles.thumbLater,
+                          ]}
+                          contentFit="cover"
+                        />
+                        {status === 'trash' ? (
+                          <View style={styles.trashBadge}>
+                            <Text style={styles.trashBadgeText}>🗑</Text>
+                          </View>
+                        ) : status === 'later' ? (
+                          <View style={styles.laterBadge}>
+                            <Text style={styles.laterBadgeText}>🕐 plus tard</Text>
+                          </View>
+                        ) : (
+                          photoIsBlurry && (
+                            <View style={styles.blurBadge}>
+                              <Text style={styles.blurBadgeText}>🌫 flou</Text>
+                            </View>
+                          )
+                        )}
+                        <Pressable
+                          style={styles.magnifyBadge}
+                          hitSlop={8}
+                          onPress={() =>
+                            openFlatViewer(group.photos, photoIndex, `Moment ${groupIndex + 1}`)
+                          }
+                        >
+                          <Text style={styles.magnifyBadgeText}>🔍</Text>
+                        </Pressable>
+                        <View style={styles.statusRow}>
+                          <Pressable
+                            style={[
+                              styles.statusButton,
+                              status === 'keep' && styles.statusButtonActiveKeep,
+                            ]}
+                            hitSlop={4}
+                            onPress={() => onSetPhotoStatus(photo.uri, 'keep')}
+                          >
+                            <Text style={styles.statusButtonText}>❤️</Text>
+                          </Pressable>
+                          <Pressable
+                            style={[
+                              styles.statusButton,
+                              status === 'later' && styles.statusButtonActiveLater,
+                            ]}
+                            hitSlop={4}
+                            onPress={() => onSetPhotoStatus(photo.uri, 'later')}
+                          >
+                            <Text style={styles.statusButtonText}>🕐</Text>
+                          </Pressable>
+                          <Pressable
+                            style={[
+                              styles.statusButton,
+                              status === 'trash' && styles.statusButtonActiveTrash,
+                            ]}
+                            hitSlop={4}
+                            onPress={() => onSetPhotoStatus(photo.uri, 'trash')}
+                          >
+                            <Text style={styles.statusButtonText}>🗑</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            ))}
           </ScrollView>
         )
       ) : groups.length === 0 ? (
