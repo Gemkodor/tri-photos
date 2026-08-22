@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatBytes } from '../lib/format';
 import type { HashedPhoto } from '../lib/perceptualHash';
 import { colors } from '../theme';
@@ -34,7 +35,25 @@ type Props = {
   onNextGroup: () => void;
 };
 
-export default function PhotoViewer({
+/**
+ * This is shown inside a react-native `Modal`, which opens its own native
+ * window on Android - the app's own top-level SafeAreaProvider (in App.tsx)
+ * measures the *main* window, so its insets don't reliably apply here. A
+ * SafeAreaProvider scoped to this window is needed for useSafeAreaInsets to
+ * return real numbers instead of zeroes, which is what was leaving the
+ * close button and group arrows sitting under the phone's status bar/clock
+ * with barely any room to tap them (confirmed by Flavie: they "répondent
+ * mal" there).
+ */
+export default function PhotoViewer(props: Props) {
+  return (
+    <SafeAreaProvider>
+      <PhotoViewerContent {...props} />
+    </SafeAreaProvider>
+  );
+}
+
+function PhotoViewerContent({
   photos,
   initialIndex,
   selected,
@@ -52,6 +71,7 @@ export default function PhotoViewer({
   onNextGroup,
 }: Props) {
   const { width } = Dimensions.get('window');
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const [index, setIndex] = useState(initialIndex);
 
@@ -71,7 +91,7 @@ export default function PhotoViewer({
 
   return (
     <View style={styles.container}>
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { paddingTop: Math.max(12, insets.top + 8) }]}>
         <Pressable onPress={onClose} hitSlop={12} style={styles.closeButton}>
           <Text style={styles.closeButtonText}>✕</Text>
         </Pressable>

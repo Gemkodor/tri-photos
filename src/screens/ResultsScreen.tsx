@@ -1237,8 +1237,27 @@ export default function ResultsScreen({
 
       {mode === 'moments' && groups.length > 0 && (
         <View style={styles.bottomBar}>
+          {selectedCount > 0 && (
+            <Pressable
+              style={[styles.deleteButton, styles.bottomBarStackedButton]}
+              disabled={deleting}
+              onPress={onDeleteSelected}
+            >
+              {deleting ? (
+                <ActivityIndicator color={colors.primaryText} />
+              ) : (
+                <Text style={styles.deleteButtonText}>
+                  🗑 Jeter {selectedCount} photo{selectedCount > 1 ? 's' : ''}
+                </Text>
+              )}
+            </Pressable>
+          )}
           <Pressable
-            style={[styles.deleteButton, moveSelection.size === 0 && styles.deleteButtonDisabled]}
+            style={[
+              styles.deleteButton,
+              styles.albumCreateButton,
+              moveSelection.size === 0 && styles.deleteButtonDisabled,
+            ]}
             disabled={moveSelection.size === 0}
             onPress={() => setMovePickerOpen(true)}
           >
@@ -1386,7 +1405,7 @@ export default function ResultsScreen({
         onRequestClose={() => setMovePickerOpen(false)}
       >
         <Pressable style={styles.movePickerBackdrop} onPress={() => setMovePickerOpen(false)}>
-          <View style={styles.movePickerSheet}>
+          <Pressable style={styles.movePickerSheet} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.movePickerTitle}>
               Déplacer {moveSelection.size} photo{moveSelection.size > 1 ? 's' : ''} vers…
             </Text>
@@ -1445,7 +1464,7 @@ export default function ResultsScreen({
             <Pressable style={styles.movePickerCancel} onPress={() => setMovePickerOpen(false)}>
               <Text style={styles.movePickerCancelText}>Annuler</Text>
             </Pressable>
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
@@ -2035,6 +2054,9 @@ const styles = StyleSheet.create({
   },
   albumCreateButton: {
     backgroundColor: colors.primary,
+  },
+  bottomBarStackedButton: {
+    marginBottom: 10,
   },
   progressBlock: {
     paddingVertical: 4,
