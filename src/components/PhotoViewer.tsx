@@ -33,6 +33,13 @@ type Props = {
   hasNextGroup: boolean;
   onPrevGroup: () => void;
   onNextGroup: () => void;
+  /** "decide"/"later"/"moments" only: when given, the three-way keep/later/trash
+   *  row is shown here instead of the plain "jeter" toggle, so the same
+   *  marking used in the grid is also available full-screen. */
+  laterUris?: Set<string>;
+  onSetPhotoStatus?: (uri: string, status: 'keep' | 'later' | 'trash') => void;
+  /** "later" step has no use for re-marking "later" - only keep/trash apply there. */
+  showLaterOption?: boolean;
 };
 
 /**
@@ -69,6 +76,9 @@ function PhotoViewerContent({
   hasNextGroup,
   onPrevGroup,
   onNextGroup,
+  laterUris,
+  onSetPhotoStatus,
+  showLaterOption = true,
 }: Props) {
   const { width } = Dimensions.get('window');
   const insets = useSafeAreaInsets();
@@ -88,6 +98,11 @@ function PhotoViewerContent({
   const photo = photos[index];
   const isSelected = selected.has(photo.uri);
   const isBlurry = blurryUris.has(photo.uri);
+  const status: 'keep' | 'later' | 'trash' = isSelected
+    ? 'trash'
+    : laterUris?.has(photo.uri)
+      ? 'later'
+      : 'keep';
 
   return (
     <View style={styles.container}>
@@ -197,14 +212,45 @@ function PhotoViewerContent({
       </View>
 
       <View style={styles.bottomBar}>
-        <Pressable
-          style={[styles.trashToggle, isSelected && styles.trashToggleActive]}
-          onPress={() => onToggleSelect(photo.uri)}
-        >
-          <Text style={styles.trashToggleText}>
-            {isSelected ? '🗑 Cette photo ira à la corbeille' : 'Jeter cette photo'}
-          </Text>
-        </Pressable>
+        {onSetPhotoStatus ? (
+          <View style={styles.viewerStatusRow}>
+            <Pressable
+              style={[styles.viewerStatusButton, status === 'keep' && styles.viewerStatusButtonActiveKeep]}
+              onPress={() => onSetPhotoStatus(photo.uri, 'keep')}
+            >
+              <Text style={styles.viewerStatusButtonText}>❤️ Garder</Text>
+            </Pressable>
+            {showLaterOption && (
+              <Pressable
+                style={[
+                  styles.viewerStatusButton,
+                  status === 'later' && styles.viewerStatusButtonActiveLater,
+                ]}
+                onPress={() => onSetPhotoStatus(photo.uri, 'later')}
+              >
+                <Text style={styles.viewerStatusButtonText}>🕐 Plus tard</Text>
+              </Pressable>
+            )}
+            <Pressable
+              style={[
+                styles.viewerStatusButton,
+                status === 'trash' && styles.viewerStatusButtonActiveTrash,
+              ]}
+              onPress={() => onSetPhotoStatus(photo.uri, 'trash')}
+            >
+              <Text style={styles.viewerStatusButtonText}>🗑 Jeter</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            style={[styles.trashToggle, isSelected && styles.trashToggleActive]}
+            onPress={() => onToggleSelect(photo.uri)}
+          >
+            <Text style={styles.trashToggleText}>
+              {isSelected ? '🗑 Cette photo ira à la corbeille' : 'Jeter cette photo'}
+            </Text>
+          </Pressable>
+        )}
         {showGroupControls && (
           <Pressable
             style={[styles.markReviewedButton, isGroupReviewed && styles.markReviewedButtonDone]}
@@ -361,6 +407,36 @@ const styles = StyleSheet.create({
   trashToggleText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  viewerStatusRow: {
+    flexDirection: 'row',
+  },
+  viewerStatusButton: {
+    flex: 1,
+    marginHorizontal: 4,
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  viewerStatusButtonActiveKeep: {
+    backgroundColor: 'rgba(47,174,96,0.35)',
+    borderColor: colors.success,
+  },
+  viewerStatusButtonActiveLater: {
+    backgroundColor: 'rgba(255,176,32,0.3)',
+    borderColor: colors.badge,
+  },
+  viewerStatusButtonActiveTrash: {
+    backgroundColor: colors.danger,
+    borderColor: colors.danger,
+  },
+  viewerStatusButtonText: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '600',
   },
   markReviewedButton: {

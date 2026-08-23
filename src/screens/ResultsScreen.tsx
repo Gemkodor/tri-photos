@@ -1366,6 +1366,8 @@ export default function ResultsScreen({
             hasNextGroup={viewerGroupIndex < visibleGroups.length - 1}
             onPrevGroup={() => goToGroup(viewerGroupIndex - 1)}
             onNextGroup={() => goToGroup(viewerGroupIndex + 1)}
+            laterUris={laterUris}
+            onSetPhotoStatus={mode === 'moments' ? onSetPhotoStatus : undefined}
           />
         )}
       </Modal>
@@ -1394,6 +1396,9 @@ export default function ResultsScreen({
             hasNextGroup={false}
             onPrevGroup={() => {}}
             onNextGroup={() => {}}
+            laterUris={laterUris}
+            onSetPhotoStatus={mode === 'decide' || mode === 'later' ? onSetPhotoStatus : undefined}
+            showLaterOption={mode !== 'later'}
           />
         )}
       </Modal>
