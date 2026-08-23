@@ -56,18 +56,15 @@ async function getOrCreateNamedFolder(parentUri: string, name: string): Promise<
 }
 
 /**
- * Copies each photo's bytes into a (created if needed) sub-folder of
- * `parentFolderUri` named `folderName`. Always a copy, never a move - the
- * originals are read-only here, nothing is deleted or altered, so this can
- * never lose a photo the way moving could.
+ * Copies each photo's bytes directly into `destFolderUri`. Always a copy,
+ * never a move - the originals are read-only here, nothing is deleted or
+ * altered, so this can never lose a photo the way moving could.
  */
-export async function copyPhotosToNewFolder(
+export async function copyPhotosToFolder(
   photos: { uri: string; name: string }[],
-  parentFolderUri: string,
-  folderName: string,
+  destFolderUri: string,
   onProgress?: (current: number, total: number) => void
 ): Promise<{ copiedCount: number; failedCount: number }> {
-  const destFolderUri = await getOrCreateNamedFolder(parentFolderUri, folderName);
   let copiedCount = 0;
   let failedCount = 0;
   for (let i = 0; i < photos.length; i++) {
@@ -85,4 +82,18 @@ export async function copyPhotosToNewFolder(
     onProgress?.(i + 1, photos.length);
   }
   return { copiedCount, failedCount };
+}
+
+/**
+ * Copies each photo's bytes into a (created if needed) sub-folder of
+ * `parentFolderUri` named `folderName`.
+ */
+export async function copyPhotosToNewFolder(
+  photos: { uri: string; name: string }[],
+  parentFolderUri: string,
+  folderName: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<{ copiedCount: number; failedCount: number }> {
+  const destFolderUri = await getOrCreateNamedFolder(parentFolderUri, folderName);
+  return copyPhotosToFolder(photos, destFolderUri, onProgress);
 }

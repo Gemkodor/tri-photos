@@ -67,6 +67,7 @@ type Props = {
   albumExporting: boolean;
   albumExportProgress: { current: number; total: number } | null;
   onCreateAlbum: (name: string) => void;
+  onCopyToExistingFolder: () => void;
 };
 
 type FlatViewer = { photos: HashedPhoto[]; index: number; title: string };
@@ -101,6 +102,7 @@ export default function ResultsScreen({
   albumExporting,
   albumExportProgress,
   onCreateAlbum,
+  onCopyToExistingFolder,
 }: Props) {
   const [viewerGroupIndex, setViewerGroupIndex] = useState<number | null>(null);
   const [viewerPhotoIndex, setViewerPhotoIndex] = useState(0);
@@ -1485,19 +1487,31 @@ export default function ResultsScreen({
       >
         <Pressable style={styles.movePickerBackdrop} onPress={() => setAlbumNameModalOpen(false)}>
           <Pressable style={styles.albumNameSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.movePickerTitle}>Nom de l'album</Text>
+            <Text style={styles.movePickerTitle}>Où mettre les photos ?</Text>
+            <Text style={styles.albumNameHint}>
+              Dans les deux cas, les photos seront copiées, pas déplacées : rien ne change dans ton
+              dossier d'origine.
+            </Text>
+
+            <Pressable
+              style={[styles.deleteButton, styles.albumCreateButton]}
+              onPress={() => {
+                setAlbumNameModalOpen(false);
+                onCopyToExistingFolder();
+              }}
+            >
+              <Text style={styles.deleteButtonText}>📂 Dans un dossier existant</Text>
+            </Pressable>
+
+            <Text style={styles.albumOrDivider}>ou</Text>
+
             <TextInput
               style={styles.albumNameInput}
               value={albumName}
               onChangeText={setAlbumName}
-              placeholder="Ex. Vacances été 2026"
+              placeholder="Nom du nouveau dossier, ex. Vacances été 2026"
               placeholderTextColor={colors.subtleText}
-              autoFocus
             />
-            <Text style={styles.albumNameHint}>
-              Tu choisiras ensuite où le mettre. Les photos seront copiées, pas déplacées : rien ne
-              change dans ton dossier d'origine.
-            </Text>
             <Pressable
               style={[
                 styles.deleteButton,
@@ -1512,8 +1526,9 @@ export default function ResultsScreen({
                 onCreateAlbum(name);
               }}
             >
-              <Text style={styles.deleteButtonText}>Continuer</Text>
+              <Text style={styles.deleteButtonText}>📁 Créer ce nouveau dossier</Text>
             </Pressable>
+
             <Pressable style={styles.movePickerCancel} onPress={() => setAlbumNameModalOpen(false)}>
               <Text style={styles.movePickerCancelText}>Annuler</Text>
             </Pressable>
@@ -2110,5 +2125,12 @@ const styles = StyleSheet.create({
     color: colors.subtleText,
     lineHeight: 17,
     marginBottom: 16,
+  },
+  albumOrDivider: {
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.subtleText,
+    marginVertical: 14,
   },
 });

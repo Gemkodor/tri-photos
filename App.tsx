@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import HashWorker, { HashWorkerHandle } from './src/components/HashWorker';
-import { copyPhotosToNewFolder } from './src/lib/albumExport';
+import { copyPhotosToFolder, copyPhotosToNewFolder } from './src/lib/albumExport';
 import { getSavedAnalysis, saveAnalysis } from './src/lib/analysisStorage';
 import {
   startScanningService,
@@ -426,28 +426,29 @@ export default function App() {
   }
 
   /**
-   * Copies every photo currently marked for the album into a new (or
-   * reused) sub-folder named `name`, inside a folder the user picks via the
-   * native folder chooser - always a copy, the originals never move.
+   * Runs a copy (either flavor below), showing progress and a final summary
+   * - shared so both "new folder" and "existing folder" report the same way.
    */
-  async function handleCreateAlbum(name: string) {
+  async function runAlbumCopy(
+    copy: (
+      photos: { uri: string; name: string }[],
+      onProgress: (current: number, total: number) => void
+    ) => Promise<{ copiedCount: number; failedCount: number }>,
+    destinationLabel: string
+  ) {
     const toExport = hashedPhotos.filter((p) => albumUris.has(p.uri));
     if (toExport.length === 0) return;
-    const parentUri = await pickFolder(lastFolderUri);
-    if (!parentUri) return;
     setAlbumExporting(true);
     setAlbumExportProgress({ current: 0, total: toExport.length });
     try {
-      const { copiedCount, failedCount } = await copyPhotosToNewFolder(
+      const { copiedCount, failedCount } = await copy(
         toExport.map((p) => ({ uri: p.uri, name: p.name })),
-        parentUri,
-        name,
         (current, total) => setAlbumExportProgress({ current, total })
       );
       if (failedCount === 0) {
         Alert.alert(
           'Album créé',
-          `${copiedCount} photo${copiedCount > 1 ? 's' : ''} copiée${copiedCount > 1 ? 's' : ''} dans "${name}". Tes photos d'origine n'ont pas bougé.`
+          `${copiedCount} photo${copiedCount > 1 ? 's' : ''} copiée${copiedCount > 1 ? 's' : ''} ${destinationLabel}. Tes photos d'origine n'ont pas bougé.`
         );
       } else {
         Alert.alert(
@@ -457,11 +458,37 @@ export default function App() {
       }
     } catch (error) {
       console.warn('Erreur création album', error);
-      Alert.alert('Un souci est survenu', "Je n'ai pas réussi à créer l'album. Réessaie.");
+      Alert.alert('Un souci est survenu', "Je n'ai pas réussi à copier les photos. Réessaie.");
     } finally {
       setAlbumExporting(false);
       setAlbumExportProgress(null);
     }
+  }
+
+  /**
+   * Copies every photo currently marked for the album into a new (or
+   * reused) sub-folder named `name`, inside a folder the user picks via the
+   * native folder chooser - always a copy, the originals never move.
+   */
+  async function handleCreateAlbum(name: string) {
+    if (albumUris.size === 0) return;
+    const parentUri = await pickFolder(lastFolderUri);
+    if (!parentUri) return;
+    await runAlbumCopy(
+      (photos, onProgress) => copyPhotosToNewFolder(photos, parentUri, name, onProgress),
+      `dans "${name}"`
+    );
+  }
+
+  /** Copies every photo currently marked for the album straight into a folder the user already has. */
+  async function handleCopyAlbumToExistingFolder() {
+    if (albumUris.size === 0) return;
+    const destUri = await pickFolder(lastFolderUri);
+    if (!destUri) return;
+    await runAlbumCopy(
+      (photos, onProgress) => copyPhotosToFolder(photos, destUri, onProgress),
+      'dans le dossier choisi'
+    );
   }
 
   /** The "decide" step's three-way mark: keep (the default, clears both), later, or trash. */
@@ -794,6 +821,7 @@ export default function App() {
             albumExporting={albumExporting}
             albumExportProgress={albumExportProgress}
             onCreateAlbum={handleCreateAlbum}
+            onCopyToExistingFolder={handleCopyAlbumToExistingFolder}
           />
         )}
 
