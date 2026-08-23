@@ -280,7 +280,7 @@ export default function ResultsScreen({
   );
 
   const headerTitle = (() => {
-    if (mode === 'final') {
+    if (mode === 'final' || mode === 'momentsFinal') {
       return `${allPhotos.length} photo${allPhotos.length > 1 ? 's' : ''} dans le dossier`;
     }
     if (mode === 'blurry') {
@@ -291,7 +291,7 @@ export default function ResultsScreen({
     if (mode === 'decide') {
       return `${allPhotos.length} photo${allPhotos.length > 1 ? 's' : ''} à trier`;
     }
-    if (mode === 'later') {
+    if (mode === 'later' || mode === 'momentsLater') {
       return laterPhotos.length === 0
         ? 'Rien à revoir pour l’instant'
         : `${laterPhotos.length} photo${laterPhotos.length > 1 ? 's' : ''} à revoir`;
@@ -426,7 +426,7 @@ export default function ResultsScreen({
         </View>
       )}
 
-      {mode === 'final' ? (
+      {mode === 'final' || mode === 'momentsFinal' ? (
         allPhotos.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>Il n'y a plus de photo dans ce dossier.</Text>
@@ -666,7 +666,7 @@ export default function ResultsScreen({
             </View>
           </ScrollView>
         )
-      ) : mode === 'later' ? (
+      ) : mode === 'later' || mode === 'momentsLater' ? (
         laterPhotos.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>Rien à revoir pour l'instant ! 🎉</Text>
@@ -1316,11 +1316,11 @@ export default function ResultsScreen({
         mode !== 'moments' &&
         mode !== 'album' &&
         mode !== 'quality' &&
-        (mode === 'final' || mode === 'decide'
+        (mode === 'final' || mode === 'momentsFinal' || mode === 'decide'
           ? allPhotos.length > 0
           : mode === 'blurry'
             ? standaloneBlurryPhotos.length > 0
-            : mode === 'later'
+            : mode === 'later' || mode === 'momentsLater'
               ? laterPhotos.length > 0
               : groups.length > 0) && (
           <View style={styles.bottomBar}>
@@ -1397,8 +1397,12 @@ export default function ResultsScreen({
             onPrevGroup={() => {}}
             onNextGroup={() => {}}
             laterUris={laterUris}
-            onSetPhotoStatus={mode === 'decide' || mode === 'later' ? onSetPhotoStatus : undefined}
-            showLaterOption={mode !== 'later'}
+            onSetPhotoStatus={
+              mode === 'decide' || mode === 'later' || mode === 'momentsLater'
+                ? onSetPhotoStatus
+                : undefined
+            }
+            showLaterOption={mode !== 'later' && mode !== 'momentsLater'}
           />
         )}
       </Modal>

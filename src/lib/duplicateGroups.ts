@@ -21,10 +21,13 @@ import type { HashedPhoto } from './perceptualHash';
  * album. Part "moments" is a third, independent pass that groups every
  * photo purely by *when* it was taken (not what it looks like) - even a
  * single photo taken well apart from any other gets its own group of one -
- * with blur marked and the same keep/later/trash choice as "decide", then
- * it too ends on "album". Part "quality" is a fourth, independent pass with
- * no grouping at all - just every photo in the folder marked good or
- * middling quality, to pick some to copy elsewhere.
+ * with blur marked and the same keep/later/trash choice as "decide"; it then
+ * gets its own "momentsLater" and "momentsFinal" wrap-up, mirroring
+ * "later"/"final" from "sorting" (Flavie expected the same reassurance of a
+ * last full pass after finishing the grouping, same as the other part
+ * already had), before it too ends on "album". Part "quality" is a fourth,
+ * independent pass with no grouping at all - just every photo in the folder
+ * marked good or middling quality, to pick some to copy elsewhere.
  */
 export type SortMode =
   | 'duplicates'
@@ -34,6 +37,8 @@ export type SortMode =
   | 'later'
   | 'final'
   | 'moments'
+  | 'momentsLater'
+  | 'momentsFinal'
   | 'album'
   | 'quality';
 export type SortPart = 'duplicates' | 'sorting' | 'moments' | 'quality';
@@ -46,6 +51,8 @@ export const SORT_STEP_ORDER: SortMode[] = [
   'later',
   'final',
   'moments',
+  'momentsLater',
+  'momentsFinal',
   'album',
   'quality',
 ];
@@ -53,7 +60,7 @@ export const SORT_PART_ORDER: SortPart[] = ['duplicates', 'sorting', 'moments', 
 
 export function partOf(mode: SortMode): SortPart {
   if (mode === 'duplicates') return 'duplicates';
-  if (mode === 'moments') return 'moments';
+  if (mode === 'moments' || mode === 'momentsLater' || mode === 'momentsFinal') return 'moments';
   if (mode === 'quality') return 'quality';
   return 'sorting';
 }
@@ -64,13 +71,16 @@ export function partOf(mode: SortMode): SortPart {
  * "sorting" and "moments" (via nextSortMode), but shown on its own once
  * there - it doesn't belong more to one than the other, and re-showing
  * either one's whole step list from inside "album" would be misleading.
+ * "momentsLater"/"momentsFinal" reuse the exact same screens as
+ * "later"/"final" (see ResultsScreen) but need their own SortMode values so
+ * this step list stays "moments"'s own instead of borrowing "sorting"'s.
  */
 export function partSteps(mode: SortMode): SortMode[] {
   if (mode === 'album') return ['album'];
   const part = partOf(mode);
   if (part === 'duplicates') return ['duplicates'];
   if (part === 'quality') return ['quality'];
-  if (part === 'moments') return ['moments', 'album'];
+  if (part === 'moments') return ['moments', 'momentsLater', 'momentsFinal', 'album'];
   return ['similar', 'blurry', 'decide', 'later', 'final', 'album'];
 }
 
@@ -196,6 +206,19 @@ export const SORT_STEPS: Record<
     shortTitle: 'Moments',
     description:
       "Regroupe toutes les photos par moment plutôt que par ressemblance - marque les floues, et choisis pour chacune : garder, plus tard, ou poubelle.",
+    defaultThreshold: 0,
+  },
+  momentsLater: {
+    title: 'À revoir plus tard',
+    shortTitle: 'Plus tard',
+    description: "Juste les photos que tu as mises de côté pour y revenir - le moment d'en décider.",
+    defaultThreshold: 0,
+  },
+  momentsFinal: {
+    title: 'Dernière vérification',
+    shortTitle: 'Vérification',
+    description:
+      'Repasse en revue toutes les photos qui restent dans le dossier (les floues restent grisées), une dernière fois avant de choisir un album.',
     defaultThreshold: 0,
   },
   album: {

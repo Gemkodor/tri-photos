@@ -101,7 +101,7 @@ export default function App() {
   const hashWorkerRef = useRef<HashWorkerHandle>(null);
 
   const groups = useMemo(() => {
-    if (mode === 'moments') return momentGroups;
+    if (mode === 'moments' || mode === 'momentsLater' || mode === 'momentsFinal') return momentGroups;
     return groupDuplicates(
       hashedPhotos,
       similarityThreshold,
