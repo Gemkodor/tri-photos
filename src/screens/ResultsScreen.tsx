@@ -61,6 +61,13 @@ type Props = {
   onMoveMomentPhotos: (photoUris: string[], targetGroupId: string | 'new') => void;
   /** "moments" only: nudges a group up or down in the list. */
   onMoveMomentGroup: (groupId: string, direction: 'up' | 'down') => void;
+  /**
+   * "album" only: the moments grouping (if any was ever computed this
+   * session), used purely to order the album grid the same way - so a
+   * moment's photos stay together and in sequence, without needing the
+   * horizontal-scroll grouped view "moments" itself uses.
+   */
+  momentGroups: DuplicateGroup[];
   /** "album"/"quality" only: photos picked to copy into a new folder. */
   albumUris: Set<string>;
   onToggleAlbum: (uri: string) => void;
@@ -97,6 +104,7 @@ export default function ResultsScreen({
   faceModelDiagnostic,
   onMoveMomentPhotos,
   onMoveMomentGroup,
+  momentGroups,
   albumUris,
   onToggleAlbum,
   albumExporting,
@@ -174,10 +182,35 @@ export default function ResultsScreen({
     () => allPhotos.filter((p) => laterUris.has(p.uri)),
     [allPhotos, laterUris]
   );
-  const albumGridPhotos = useMemo(
-    () => (showOnlyAlbum ? allPhotos.filter((p) => albumUris.has(p.uri)) : allPhotos),
-    [allPhotos, albumUris, showOnlyAlbum]
-  );
+  // "album" only: when it followed "Tri par moments", lay the grid out in
+  // that same order (moment by moment) instead of whatever order the scan
+  // happened to produce - so it still reads as "moment 1's photos, then
+  // moment 2's..." without needing that screen's horizontal per-group
+  // scroll. Falls back to the plain scan order otherwise (reached from
+  // "similar" instead, or no moments grouping exists this session).
+  const momentOrderedAlbumPhotos = useMemo(() => {
+    if (mode !== 'album' || momentGroups.length === 0) return allPhotos;
+    const seen = new Set<string>();
+    const ordered: HashedPhoto[] = [];
+    momentGroups.forEach((g) =>
+      g.photos.forEach((p) => {
+        if (seen.has(p.uri)) return;
+        seen.add(p.uri);
+        ordered.push(p);
+      })
+    );
+    // Any photo not in a moment (e.g. added/rescanned since) still needs to show up somewhere.
+    allPhotos.forEach((p) => {
+      if (seen.has(p.uri)) return;
+      seen.add(p.uri);
+      ordered.push(p);
+    });
+    return ordered;
+  }, [mode, momentGroups, allPhotos]);
+  const albumGridPhotos = useMemo(() => {
+    const base = mode === 'album' ? momentOrderedAlbumPhotos : allPhotos;
+    return showOnlyAlbum ? base.filter((p) => albumUris.has(p.uri)) : base;
+  }, [allPhotos, momentOrderedAlbumPhotos, mode, albumUris, showOnlyAlbum]);
 
   function isBlurry(photo: HashedPhoto): boolean {
     return isBlurryPhoto(photo, groupByUri.get(photo.uri) ?? null, sharpnessBaseline);
@@ -967,8 +1000,10 @@ export default function ResultsScreen({
                       recyclingKey={photo.uri}
                       style={[
                         styles.thumb,
-                        isAlbumSelected && styles.thumbAlbumSelected,
-                        !isAlbumSelected && photoIsMediocre && styles.thumbBlurry,
+                        styles.thumbWithBorderSlot,
+                        isAlbumSelected
+                          ? styles.thumbAlbumSelected
+                          : photoIsMediocre && styles.thumbBlurry,
                       ]}
                       contentFit="cover"
                     />
@@ -1814,8 +1849,19 @@ const styles = StyleSheet.create({
   thumbLater: {
     opacity: 0.6,
   },
-  thumbAlbumSelected: {
+  // A constant-width, initially-invisible border "slot" for the album grid,
+  // so selecting/deselecting only ever changes a color, never the border
+  // width - changing the width shrinks/grows the image's own content box,
+  // which was making expo-image occasionally redraw it blank on Android
+  // (confirmed by Flavie: deselecting "often" left a gray square instead of
+  // the photo). thumbSelected/thumbBlurry elsewhere use opacity or a border
+  // that's static per-photo, not toggled by the user, so they don't have
+  // this problem.
+  thumbWithBorderSlot: {
     borderWidth: 3,
+    borderColor: 'transparent',
+  },
+  thumbAlbumSelected: {
     borderColor: colors.primary,
   },
   blurGrid: {

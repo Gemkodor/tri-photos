@@ -445,6 +445,10 @@ export default function App() {
         toExport.map((p) => ({ uri: p.uri, name: p.name })),
         (current, total) => setAlbumExportProgress({ current, total })
       );
+      // Copied photos have nothing more to do here - clearing the
+      // selection makes it easy to pick a fresh batch right away instead
+      // of having to untick everything that was just copied.
+      setAlbumUris(new Set());
       if (failedCount === 0) {
         Alert.alert(
           'Album créé',
@@ -816,6 +820,7 @@ export default function App() {
             faceModelDiagnostic={faceModelDiagnostic}
             onMoveMomentPhotos={moveMomentPhotos}
             onMoveMomentGroup={moveMomentGroup}
+            momentGroups={momentGroups}
             albumUris={albumUris}
             onToggleAlbum={toggleAlbum}
             albumExporting={albumExporting}
