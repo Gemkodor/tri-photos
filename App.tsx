@@ -597,11 +597,19 @@ export default function App() {
     }
   }
 
-  async function handleDeleteSelected() {
+  /**
+   * Jette a specific set of photos, regardless of whether they're marked in
+   * `selected` - used both for the ❤️/🕐/🗑-marked ones (handleDeleteSelected)
+   * and for "moments"'s checkbox multi-select, which is a separate selection
+   * concept (used for moving between groups) that Flavie also wanted usable
+   * to jeter directly, without first re-marking each photo one by one.
+   */
+  async function deletePhotos(uris: string[]) {
+    const uriSet = new Set(uris);
     // Looked up from every analyzed photo, not just `groups` - a selected
     // photo may only exist in the flat "photos floues" list, with no
     // duplicate group of its own.
-    const toDelete = hashedPhotos.filter((p) => selected.has(p.uri));
+    const toDelete = hashedPhotos.filter((p) => uriSet.has(p.uri));
     if (toDelete.length === 0) return;
 
     Alert.alert(
@@ -679,6 +687,10 @@ export default function App() {
         },
       ]
     );
+  }
+
+  function handleDeleteSelected() {
+    deletePhotos(Array.from(selected));
   }
 
   const MISSING_SOURCE_MESSAGE =
@@ -813,6 +825,7 @@ export default function App() {
             onSelectExceptBest={selectExceptBest}
             onMarkGroupReviewed={markGroupReviewed}
             onDeleteSelected={handleDeleteSelected}
+            onDeleteUris={deletePhotos}
             onBack={() => setScreen('home')}
             onOpenTrash={() => setScreen('trash')}
             onSwitchMode={switchMode}

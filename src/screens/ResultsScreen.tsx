@@ -51,6 +51,8 @@ type Props = {
   onSelectExceptBest: (uris: string[]) => void;
   onMarkGroupReviewed: (key: string) => void;
   onDeleteSelected: () => void;
+  /** Jette an explicit list of photos (with its own confirmation), regardless of `selected`. */
+  onDeleteUris: (uris: string[]) => void;
   onBack: () => void;
   onOpenTrash: () => void;
   onSwitchMode: (mode: SortMode) => void;
@@ -97,6 +99,7 @@ export default function ResultsScreen({
   onSelectExceptBest,
   onMarkGroupReviewed,
   onDeleteSelected,
+  onDeleteUris,
   onBack,
   onOpenTrash,
   onSwitchMode,
@@ -1289,21 +1292,36 @@ export default function ResultsScreen({
               )}
             </Pressable>
           )}
-          <Pressable
-            style={[
-              styles.deleteButton,
-              styles.albumCreateButton,
-              moveSelection.size === 0 && styles.deleteButtonDisabled,
-            ]}
-            disabled={moveSelection.size === 0}
-            onPress={() => setMovePickerOpen(true)}
-          >
-            <Text style={styles.deleteButtonText}>
-              {moveSelection.size === 0
-                ? 'Coche des photos à déplacer'
-                : `Déplacer ${moveSelection.size} photo${moveSelection.size > 1 ? 's' : ''}`}
-            </Text>
-          </Pressable>
+          {moveSelection.size === 0 ? (
+            <Pressable style={[styles.deleteButton, styles.deleteButtonDisabled]} disabled>
+              <Text style={styles.deleteButtonText}>Coche des photos pour les jeter ou déplacer</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.momentsSelectionActionsRow}>
+              <Pressable
+                style={[styles.deleteButton, styles.momentsSelectionActionButton]}
+                onPress={() => {
+                  const uris = Array.from(moveSelection);
+                  setMoveSelection(new Set());
+                  onDeleteUris(uris);
+                }}
+              >
+                <Text style={styles.deleteButtonText}>
+                  🗑 Jeter ({moveSelection.size})
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.deleteButton,
+                  styles.albumCreateButton,
+                  styles.momentsSelectionActionButton,
+                ]}
+                onPress={() => setMovePickerOpen(true)}
+              >
+                <Text style={styles.deleteButtonText}>Déplacer ({moveSelection.size})</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       )}
 
@@ -2127,6 +2145,13 @@ const styles = StyleSheet.create({
   },
   bottomBarStackedButton: {
     marginBottom: 10,
+  },
+  momentsSelectionActionsRow: {
+    flexDirection: 'row',
+  },
+  momentsSelectionActionButton: {
+    flex: 1,
+    marginHorizontal: 4,
   },
   progressBlock: {
     paddingVertical: 4,
