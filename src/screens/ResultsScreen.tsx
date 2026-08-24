@@ -136,6 +136,14 @@ export default function ResultsScreen({
       return next;
     });
   }
+  // "moments": a single "jeter" count covering both ways a photo can end up
+  // marked for the trash there - ❤️/🕐/🗑-marked (full-screen or the status
+  // row) and ticked in the grid (otherwise used to move between moments) -
+  // so there's only ever one "Jeter N" button, not two overlapping ones.
+  const trashCandidateUris = useMemo(
+    () => new Set([...selected, ...moveSelection]),
+    [selected, moveSelection]
+  );
   const [showReviewed, setShowReviewed] = useState(false);
   const [keepMode, setKeepMode] = useState(false);
   const [kept, setKept] = useState<Set<string>>(new Set());
@@ -1277,51 +1285,44 @@ export default function ResultsScreen({
 
       {mode === 'moments' && groups.length > 0 && (
         <View style={styles.bottomBar}>
-          {selectedCount > 0 && (
+          {/* One single "jeter" count, whichever way those photos got
+              marked - photos ❤️/🕐/🗑-marked full-screen and photos ticked
+              in the grid used to show as two separate, confusingly
+              overlapping "Jeter N" buttons (confirmed by Flavie). */}
+          {trashCandidateUris.size > 0 && (
             <Pressable
               style={[styles.deleteButton, styles.bottomBarStackedButton]}
               disabled={deleting}
-              onPress={onDeleteSelected}
+              onPress={() => {
+                const uris = Array.from(trashCandidateUris);
+                setMoveSelection(new Set());
+                onDeleteUris(uris);
+              }}
             >
               {deleting ? (
                 <ActivityIndicator color={colors.primaryText} />
               ) : (
                 <Text style={styles.deleteButtonText}>
-                  🗑 Jeter {selectedCount} photo{selectedCount > 1 ? 's' : ''}
+                  🗑 Jeter {trashCandidateUris.size} photo{trashCandidateUris.size > 1 ? 's' : ''}
                 </Text>
               )}
             </Pressable>
           )}
-          {moveSelection.size === 0 ? (
-            <Pressable style={[styles.deleteButton, styles.deleteButtonDisabled]} disabled>
-              <Text style={styles.deleteButtonText}>Coche des photos pour les jeter ou déplacer</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.momentsSelectionActionsRow}>
-              <Pressable
-                style={[styles.deleteButton, styles.momentsSelectionActionButton]}
-                onPress={() => {
-                  const uris = Array.from(moveSelection);
-                  setMoveSelection(new Set());
-                  onDeleteUris(uris);
-                }}
-              >
-                <Text style={styles.deleteButtonText}>
-                  🗑 Jeter ({moveSelection.size})
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.deleteButton,
-                  styles.albumCreateButton,
-                  styles.momentsSelectionActionButton,
-                ]}
-                onPress={() => setMovePickerOpen(true)}
-              >
-                <Text style={styles.deleteButtonText}>Déplacer ({moveSelection.size})</Text>
-              </Pressable>
-            </View>
-          )}
+          <Pressable
+            style={[
+              styles.deleteButton,
+              styles.albumCreateButton,
+              moveSelection.size === 0 && styles.deleteButtonDisabled,
+            ]}
+            disabled={moveSelection.size === 0}
+            onPress={() => setMovePickerOpen(true)}
+          >
+            <Text style={styles.deleteButtonText}>
+              {moveSelection.size === 0
+                ? 'Coche des photos à déplacer'
+                : `Déplacer ${moveSelection.size} photo${moveSelection.size > 1 ? 's' : ''}`}
+            </Text>
+          </Pressable>
         </View>
       )}
 
@@ -2145,13 +2146,6 @@ const styles = StyleSheet.create({
   },
   bottomBarStackedButton: {
     marginBottom: 10,
-  },
-  momentsSelectionActionsRow: {
-    flexDirection: 'row',
-  },
-  momentsSelectionActionButton: {
-    flex: 1,
-    marginHorizontal: 4,
   },
   progressBlock: {
     paddingVertical: 4,
