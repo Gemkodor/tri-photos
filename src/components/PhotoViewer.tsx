@@ -42,6 +42,13 @@ type Props = {
   onSetPhotoStatus?: (uri: string, status: 'keep' | 'later' | 'trash') => void;
   /** "later" step has no use for re-marking "later" - only keep/trash apply there. */
   showLaterOption?: boolean;
+  /** "album"/"quality" only: when given, a "add to album" toggle is shown
+   *  here instead of the plain "jeter" toggle - jeter doesn't belong on this
+   *  screen at all (Flavie: it's about picking photos to copy, not trashing
+   *  them). Takes priority over onSetPhotoStatus, though the two are never
+   *  both given in practice. */
+  albumUris?: Set<string>;
+  onToggleAlbum?: (uri: string) => void;
 };
 
 /**
@@ -82,6 +89,8 @@ function PhotoViewerContent({
   keptUris,
   onSetPhotoStatus,
   showLaterOption = true,
+  albumUris,
+  onToggleAlbum,
 }: Props) {
   const { width } = Dimensions.get('window');
   const insets = useSafeAreaInsets();
@@ -101,6 +110,7 @@ function PhotoViewerContent({
   const photo = photos[index];
   const isSelected = selected.has(photo.uri);
   const isBlurry = blurryUris.has(photo.uri);
+  const isInAlbum = albumUris?.has(photo.uri) ?? false;
   // "keep" only ever comes from an explicit ❤️ tap (keptUris) - an
   // untouched photo is "undecided", not "keep" (see ResultsScreen's
   // photoStatus, which this mirrors) - so the ❤️ button doesn't look
@@ -250,6 +260,15 @@ function PhotoViewerContent({
               <Text style={styles.viewerStatusButtonText}>🗑 Jeter</Text>
             </Pressable>
           </View>
+        ) : onToggleAlbum ? (
+          <Pressable
+            style={[styles.trashToggle, isInAlbum && styles.albumToggleActive]}
+            onPress={() => onToggleAlbum(photo.uri)}
+          >
+            <Text style={styles.trashToggleText}>
+              {isInAlbum ? '📁 Dans l’album (touche pour retirer)' : '📁 Ajouter à l’album'}
+            </Text>
+          </Pressable>
         ) : (
           <Pressable
             style={[styles.trashToggle, isSelected && styles.trashToggleActive]}
@@ -412,6 +431,10 @@ const styles = StyleSheet.create({
   trashToggleActive: {
     backgroundColor: colors.danger,
     borderColor: colors.danger,
+  },
+  albumToggleActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   trashToggleText: {
     color: '#fff',

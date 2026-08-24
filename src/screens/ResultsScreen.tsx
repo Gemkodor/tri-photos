@@ -171,7 +171,18 @@ export default function ResultsScreen({
 
   const selectedCount = selected.size;
   const hasGroups = mode === 'duplicates' || mode === 'similar' || mode === 'moments';
-  const currentPartSteps = partSteps(mode);
+  // "album" is reachable from both "sorting" and "moments", so it has no
+  // fixed step list of its own (see partSteps) - once actually on it,
+  // showing whichever flow's steps got it here (guessed from whether a
+  // moments grouping exists this session) lets Flavie jump back to any of
+  // them, instead of "album" being a dead end with no way back except
+  // "Nouvelle analyse".
+  const currentPartSteps =
+    mode === 'album'
+      ? momentGroups.length > 0
+        ? partSteps('moments')
+        : partSteps('final')
+      : partSteps(mode);
 
   // Blur is judged two ways: relative to a photo's own group (catches a
   // blurry shot among otherwise-sharp near-duplicates) and relative to the
@@ -1573,6 +1584,8 @@ export default function ResultsScreen({
                 : undefined
             }
             showLaterOption={mode !== 'later' && mode !== 'momentsLater'}
+            albumUris={mode === 'album' || mode === 'quality' ? albumUris : undefined}
+            onToggleAlbum={mode === 'album' || mode === 'quality' ? onToggleAlbum : undefined}
           />
         )}
       </Modal>
