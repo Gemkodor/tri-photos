@@ -69,9 +69,14 @@ export default function App() {
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // "Voir plus tard" marks from the "decide" step - a photo can be in
-  // `selected` (poubelle) or in here (later), never both; neither means
-  // "garder" (the default, nothing to do for those).
+  // `selected` (poubelle), `laterUris`, or `keptUris`, never more than one
+  // at a time; being in none of the three means "pas encore décidé" (not
+  // decided yet - deliberately distinct from `keptUris`, since a photo
+  // Flavie hasn't looked at yet isn't the same as one she's actively chosen
+  // to keep; the ❤️ button used to look "on" by default for every untouched
+  // photo, which was misleading).
   const [laterUris, setLaterUris] = useState<Set<string>>(new Set());
+  const [keptUris, setKeptUris] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([]);
   // Shown as a progress bar on the trash screen during "Tout ranger"/"Tout
@@ -222,6 +227,7 @@ export default function App() {
       setSimilarityThreshold(threshold);
       setSelected(new Set());
       setLaterUris(new Set());
+      setKeptUris(new Set());
       setAlbumUris(new Set());
       setReviewedGroupKeys(new Set());
       setScreen('results');
@@ -509,6 +515,15 @@ export default function App() {
     setLaterUris((prev) => {
       const has = prev.has(uri);
       const shouldHave = status === 'later';
+      if (has === shouldHave) return prev;
+      const next = new Set(prev);
+      if (shouldHave) next.add(uri);
+      else next.delete(uri);
+      return next;
+    });
+    setKeptUris((prev) => {
+      const has = prev.has(uri);
+      const shouldHave = status === 'keep';
       if (has === shouldHave) return prev;
       const next = new Set(prev);
       if (shouldHave) next.add(uri);
@@ -814,6 +829,7 @@ export default function App() {
             groups={groups}
             selected={selected}
             laterUris={laterUris}
+            keptUris={keptUris}
             onSetPhotoStatus={setPhotoStatus}
             deleting={deleting}
             similarityThreshold={similarityThreshold}

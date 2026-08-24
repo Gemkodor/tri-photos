@@ -37,6 +37,8 @@ type Props = {
    *  row is shown here instead of the plain "jeter" toggle, so the same
    *  marking used in the grid is also available full-screen. */
   laterUris?: Set<string>;
+  /** Photos explicitly marked ❤️ - see photoStatus() below for why this is separate from "untouched". */
+  keptUris?: Set<string>;
   onSetPhotoStatus?: (uri: string, status: 'keep' | 'later' | 'trash') => void;
   /** "later" step has no use for re-marking "later" - only keep/trash apply there. */
   showLaterOption?: boolean;
@@ -77,6 +79,7 @@ function PhotoViewerContent({
   onPrevGroup,
   onNextGroup,
   laterUris,
+  keptUris,
   onSetPhotoStatus,
   showLaterOption = true,
 }: Props) {
@@ -98,11 +101,17 @@ function PhotoViewerContent({
   const photo = photos[index];
   const isSelected = selected.has(photo.uri);
   const isBlurry = blurryUris.has(photo.uri);
-  const status: 'keep' | 'later' | 'trash' = isSelected
+  // "keep" only ever comes from an explicit ❤️ tap (keptUris) - an
+  // untouched photo is "undecided", not "keep" (see ResultsScreen's
+  // photoStatus, which this mirrors) - so the ❤️ button doesn't look
+  // pre-activated on every photo nobody has looked at yet.
+  const status: 'keep' | 'later' | 'trash' | 'undecided' = isSelected
     ? 'trash'
     : laterUris?.has(photo.uri)
       ? 'later'
-      : 'keep';
+      : keptUris?.has(photo.uri)
+        ? 'keep'
+        : 'undecided';
 
   return (
     <View style={styles.container}>

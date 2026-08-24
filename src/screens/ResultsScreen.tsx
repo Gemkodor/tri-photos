@@ -40,6 +40,8 @@ type Props = {
   groups: DuplicateGroup[];
   selected: Set<string>;
   laterUris: Set<string>;
+  /** Photos explicitly marked ❤️ "garder" - deliberately separate from "untouched", see status() below. */
+  keptUris: Set<string>;
   onSetPhotoStatus: (uri: string, status: 'keep' | 'later' | 'trash') => void;
   deleting: boolean;
   similarityThreshold: number;
@@ -88,6 +90,7 @@ export default function ResultsScreen({
   groups,
   selected,
   laterUris,
+  keptUris,
   onSetPhotoStatus,
   deleting,
   similarityThreshold,
@@ -145,6 +148,10 @@ export default function ResultsScreen({
     [selected, moveSelection]
   );
   const [showReviewed, setShowReviewed] = useState(false);
+  // "decide"/"moments": photos explicitly marked ❤️ hide themselves (like a
+  // reviewed group does) so the screen only ever shows what's left to
+  // decide - this brings them back.
+  const [showKeptPhotos, setShowKeptPhotos] = useState(false);
   const [keepMode, setKeepMode] = useState(false);
   const [kept, setKept] = useState<Set<string>>(new Set());
   const [hideUnhearted, setHideUnhearted] = useState(false);
@@ -193,6 +200,22 @@ export default function ResultsScreen({
     () => allPhotos.filter((p) => laterUris.has(p.uri)),
     [allPhotos, laterUris]
   );
+  // "decide": ❤️-marked photos hide themselves once decided, same as a
+  // reviewed group - only what's left undecided (or later/trash-marked)
+  // stays on screen by default.
+  const decideKeptCount = useMemo(
+    () => allPhotos.filter((p) => keptUris.has(p.uri)).length,
+    [allPhotos, keptUris]
+  );
+  const decideVisiblePhotos = useMemo(
+    () => (showKeptPhotos ? allPhotos : allPhotos.filter((p) => !keptUris.has(p.uri))),
+    [allPhotos, keptUris, showKeptPhotos]
+  );
+  // "moments": same idea, counted across every group's photos.
+  const momentsKeptCount = useMemo(
+    () => groups.reduce((sum, g) => sum + g.photos.filter((p) => keptUris.has(p.uri)).length, 0),
+    [groups, keptUris]
+  );
   // "album" only: when it followed "Tri par moments", lay the grid out in
   // that same order (moment by moment) instead of whatever order the scan
   // happened to produce - so it still reads as "moment 1's photos, then
@@ -225,6 +248,21 @@ export default function ResultsScreen({
 
   function isBlurry(photo: HashedPhoto): boolean {
     return isBlurryPhoto(photo, groupByUri.get(photo.uri) ?? null, sharpnessBaseline);
+  }
+
+  type PhotoStatus = 'keep' | 'later' | 'trash' | 'undecided';
+
+  /**
+   * "keep" only ever comes from an explicit ❤️ tap (see keptUris) - a photo
+   * nobody has touched yet is "undecided", not "keep". They used to be the
+   * same thing, which made the ❤️ button look pre-activated on every
+   * untouched photo (confirmed confusing by Flavie).
+   */
+  function photoStatus(uri: string): PhotoStatus {
+    if (selected.has(uri)) return 'trash';
+    if (laterUris.has(uri)) return 'later';
+    if (keptUris.has(uri)) return 'keep';
+    return 'undecided';
   }
 
   const reviewedCount = groups.filter((g) => reviewedGroupKeys.has(groupKey(g))).length;
@@ -629,24 +667,60 @@ export default function ResultsScreen({
           <View style={styles.empty}>
             <Text style={styles.emptyText}>Il n'y a plus de photo dans ce dossier.</Text>
           </View>
+        ) : decideVisiblePhotos.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>Tu as décidé pour toutes les photos ! 🎉</Text>
+            {decideKeptCount > 0 && (
+              <Pressable
+                onPress={() => setShowKeptPhotos(true)}
+                hitSlop={8}
+                style={styles.reviewAgainLink}
+              >
+                <Text style={styles.selectAllButtonText}>Revoir les gardées</Text>
+              </Pressable>
+            )}
+            {nextMode && (
+              <Pressable
+                onPress={() => onSwitchMode(nextMode)}
+                hitSlop={8}
+                style={styles.reviewAgainLink}
+              >
+                <Text style={styles.selectAllButtonText}>
+                  ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                </Text>
+              </Pressable>
+            )}
+          </View>
         ) : (
           <ScrollView contentContainerStyle={styles.list}>
             <Text style={styles.instructions}>
-              Pour chaque photo : ❤️ à garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle. Touche la
-              loupe pour voir en grand.
+              Pour chaque photo : ❤️ à garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle. Une photo
+              gardée disparaît de la liste, comme un groupe marqué vu. Touche la loupe pour voir en
+              grand.
             </Text>
-            {nextMode && (
-              <View style={styles.bulkActionsRow}>
+            <View style={styles.bulkActionsRow}>
+              {decideKeptCount > 0 && (
+                <Pressable
+                  style={styles.selectAllButton}
+                  onPress={() => setShowKeptPhotos((v) => !v)}
+                >
+                  <Text style={styles.selectAllButtonText}>
+                    {decideKeptCount} gardée{decideKeptCount > 1 ? 's' : ''} ·{' '}
+                    {showKeptPhotos ? 'masquer' : 'afficher'}
+                  </Text>
+                </Pressable>
+              )}
+              {nextMode && (
                 <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
                   <Text style={styles.selectAllButtonText}>
                     ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
                   </Text>
                 </Pressable>
-              </View>
-            )}
+              )}
+            </View>
             <View style={styles.blurGrid}>
-              {allPhotos.map((photo, index) => {
-                const status = selected.has(photo.uri) ? 'trash' : laterUris.has(photo.uri) ? 'later' : 'keep';
+              {decideVisiblePhotos.map((photo, index) => {
+                const status = photoStatus(photo.uri);
                 const photoIsBlurry = isBlurry(photo);
                 return (
                   <View key={photo.uri} style={styles.blurGridItem}>
@@ -655,7 +729,10 @@ export default function ResultsScreen({
                       recyclingKey={photo.uri}
                       style={[
                         styles.thumb,
-                        photoIsBlurry && status === 'keep' && styles.thumbBlurry,
+                        photoIsBlurry &&
+                          status !== 'trash' &&
+                          status !== 'later' &&
+                          styles.thumbBlurry,
                         status === 'trash' && styles.thumbSelected,
                         status === 'later' && styles.thumbLater,
                       ]}
@@ -679,7 +756,9 @@ export default function ResultsScreen({
                     <Pressable
                       style={styles.magnifyBadge}
                       hitSlop={8}
-                      onPress={() => openFlatViewer(allPhotos, index, 'Garder, plus tard ou poubelle')}
+                      onPress={() =>
+                        openFlatViewer(decideVisiblePhotos, index, 'Garder, plus tard ou poubelle')
+                      }
                     >
                       <Text style={styles.magnifyBadgeText}>🔍</Text>
                     </Pressable>
@@ -804,25 +883,63 @@ export default function ResultsScreen({
           <View style={styles.empty}>
             <Text style={styles.emptyText}>Il n'y a plus de photo dans ce dossier.</Text>
           </View>
+        ) : !showKeptPhotos && groups.every((g) => g.photos.every((p) => keptUris.has(p.uri))) ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>Tu as gardé toutes les photos ! 🎉</Text>
+            <Pressable
+              onPress={() => setShowKeptPhotos(true)}
+              hitSlop={8}
+              style={styles.reviewAgainLink}
+            >
+              <Text style={styles.selectAllButtonText}>Revoir les gardées</Text>
+            </Pressable>
+            {nextMode && (
+              <Pressable
+                onPress={() => onSwitchMode(nextMode)}
+                hitSlop={8}
+                style={styles.reviewAgainLink}
+              >
+                <Text style={styles.selectAllButtonText}>
+                  ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                </Text>
+              </Pressable>
+            )}
+          </View>
         ) : (
           <ScrollView contentContainerStyle={styles.list}>
             <Text style={styles.instructions}>
               Les photos sont regroupées par moment (quand elles ont été prises), pas par
               ressemblance - même les photos seules ont leur groupe. Pour chaque photo : ❤️ à
-              garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle. Coche une ou plusieurs photos (le
-              rond en haut à gauche) pour les déplacer ensemble vers un autre moment.
+              garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle - une photo gardée disparaît du
+              groupe, comme un groupe marqué vu. Coche une ou plusieurs photos (le rond en haut à
+              gauche) pour les déplacer ensemble vers un autre moment.
             </Text>
-            {nextMode && (
-              <View style={styles.bulkActionsRow}>
+            <View style={styles.bulkActionsRow}>
+              {momentsKeptCount > 0 && (
+                <Pressable
+                  style={styles.selectAllButton}
+                  onPress={() => setShowKeptPhotos((v) => !v)}
+                >
+                  <Text style={styles.selectAllButtonText}>
+                    {momentsKeptCount} gardée{momentsKeptCount > 1 ? 's' : ''} ·{' '}
+                    {showKeptPhotos ? 'masquer' : 'afficher'}
+                  </Text>
+                </Pressable>
+              )}
+              {nextMode && (
                 <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
                   <Text style={styles.selectAllButtonText}>
                     ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
                   </Text>
                 </Pressable>
-              </View>
-            )}
+              )}
+            </View>
             {visibleGroups.map((group, groupIndex) => {
-              const allChecked = group.photos.every((p) => moveSelection.has(p.uri));
+              const visiblePhotos = showKeptPhotos
+                ? group.photos
+                : group.photos.filter((p) => !keptUris.has(p.uri));
+              if (visiblePhotos.length === 0) return null;
+              const allChecked = visiblePhotos.every((p) => moveSelection.has(p.uri));
               return (
                 <View key={group.id} style={styles.groupCard}>
                   <View style={styles.groupHeaderRow}>
@@ -864,7 +981,7 @@ export default function ResultsScreen({
                         onPress={() =>
                           setMoveSelection((prev) => {
                             const next = new Set(prev);
-                            group.photos.forEach((p) => {
+                            visiblePhotos.forEach((p) => {
                               if (allChecked) next.delete(p.uri);
                               else next.add(p.uri);
                             });
@@ -879,13 +996,9 @@ export default function ResultsScreen({
                     </View>
                   </View>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    {group.photos.map((photo) => {
+                    {visiblePhotos.map((photo) => {
                       const photoIndex = group.photos.indexOf(photo);
-                      const status = selected.has(photo.uri)
-                        ? 'trash'
-                        : laterUris.has(photo.uri)
-                          ? 'later'
-                          : 'keep';
+                      const status = photoStatus(photo.uri);
                       const photoIsBlurry = isBlurry(photo);
                       const isChecked = moveSelection.has(photo.uri);
                       return (
@@ -895,7 +1008,10 @@ export default function ResultsScreen({
                       recyclingKey={photo.uri}
                             style={[
                               styles.thumb,
-                              photoIsBlurry && status === 'keep' && styles.thumbBlurry,
+                              photoIsBlurry &&
+                                status !== 'trash' &&
+                                status !== 'later' &&
+                                styles.thumbBlurry,
                               status === 'trash' && styles.thumbSelected,
                               status === 'later' && styles.thumbLater,
                             ]}
@@ -1423,6 +1539,7 @@ export default function ResultsScreen({
             onPrevGroup={() => goToGroup(viewerGroupIndex - 1)}
             onNextGroup={() => goToGroup(viewerGroupIndex + 1)}
             laterUris={laterUris}
+            keptUris={keptUris}
             onSetPhotoStatus={mode === 'moments' ? onSetPhotoStatus : undefined}
           />
         )}
@@ -1453,6 +1570,7 @@ export default function ResultsScreen({
             onPrevGroup={() => {}}
             onNextGroup={() => {}}
             laterUris={laterUris}
+            keptUris={keptUris}
             onSetPhotoStatus={
               mode === 'decide' || mode === 'later' || mode === 'momentsLater'
                 ? onSetPhotoStatus
