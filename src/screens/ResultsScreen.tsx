@@ -196,10 +196,31 @@ export default function ResultsScreen({
     () => blurryPhotos.filter((p) => !groupByUri.has(p.uri)),
     [blurryPhotos, groupByUri]
   );
-  const laterPhotos = useMemo(
-    () => allPhotos.filter((p) => laterUris.has(p.uri)),
-    [allPhotos, laterUris]
-  );
+  // Every photo's position in the moments classification, e.g. for laying
+  // out "album"/"À revoir plus tard" (moments part) in that same order
+  // instead of whatever order the scan happened to produce - so a moment's
+  // photos stay together and in sequence there too, the way "Tri par
+  // moments" itself already shows them. Empty (so ordering is a no-op) when
+  // no moments grouping exists this session (e.g. "album" reached from
+  // "similar" instead).
+  const momentOrderIndex = useMemo(() => {
+    const map = new Map<string, number>();
+    let i = 0;
+    momentGroups.forEach((g) => g.photos.forEach((p) => map.set(p.uri, i++)));
+    return map;
+  }, [momentGroups]);
+  function sortByMomentOrder(photos: HashedPhoto[]): HashedPhoto[] {
+    if (momentOrderIndex.size === 0) return photos;
+    // Anything not part of a moment (e.g. added/rescanned since) sorts after everything that is.
+    return [...photos].sort(
+      (a, b) =>
+        (momentOrderIndex.get(a.uri) ?? Infinity) - (momentOrderIndex.get(b.uri) ?? Infinity)
+    );
+  }
+  const laterPhotos = useMemo(() => {
+    const base = allPhotos.filter((p) => laterUris.has(p.uri));
+    return mode === 'momentsLater' ? sortByMomentOrder(base) : base;
+  }, [allPhotos, laterUris, mode, momentOrderIndex]);
   // "decide": ❤️-marked photos hide themselves once decided, same as a
   // reviewed group - only what's left undecided (or later/trash-marked)
   // stays on screen by default.
@@ -216,35 +237,10 @@ export default function ResultsScreen({
     () => groups.reduce((sum, g) => sum + g.photos.filter((p) => keptUris.has(p.uri)).length, 0),
     [groups, keptUris]
   );
-  // "album" only: when it followed "Tri par moments", lay the grid out in
-  // that same order (moment by moment) instead of whatever order the scan
-  // happened to produce - so it still reads as "moment 1's photos, then
-  // moment 2's..." without needing that screen's horizontal per-group
-  // scroll. Falls back to the plain scan order otherwise (reached from
-  // "similar" instead, or no moments grouping exists this session).
-  const momentOrderedAlbumPhotos = useMemo(() => {
-    if (mode !== 'album' || momentGroups.length === 0) return allPhotos;
-    const seen = new Set<string>();
-    const ordered: HashedPhoto[] = [];
-    momentGroups.forEach((g) =>
-      g.photos.forEach((p) => {
-        if (seen.has(p.uri)) return;
-        seen.add(p.uri);
-        ordered.push(p);
-      })
-    );
-    // Any photo not in a moment (e.g. added/rescanned since) still needs to show up somewhere.
-    allPhotos.forEach((p) => {
-      if (seen.has(p.uri)) return;
-      seen.add(p.uri);
-      ordered.push(p);
-    });
-    return ordered;
-  }, [mode, momentGroups, allPhotos]);
   const albumGridPhotos = useMemo(() => {
-    const base = mode === 'album' ? momentOrderedAlbumPhotos : allPhotos;
+    const base = mode === 'album' ? sortByMomentOrder(allPhotos) : allPhotos;
     return showOnlyAlbum ? base.filter((p) => albumUris.has(p.uri)) : base;
-  }, [allPhotos, momentOrderedAlbumPhotos, mode, albumUris, showOnlyAlbum]);
+  }, [allPhotos, mode, momentOrderIndex, albumUris, showOnlyAlbum]);
 
   function isBlurry(photo: HashedPhoto): boolean {
     return isBlurryPhoto(photo, groupByUri.get(photo.uri) ?? null, sharpnessBaseline);
