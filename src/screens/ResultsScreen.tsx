@@ -8,9 +8,9 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
+import FolderDestinationModal from '../components/FolderDestinationModal';
 import PhotoViewer from '../components/PhotoViewer';
 import {
   bestPhotoReason,
@@ -79,6 +79,17 @@ type Props = {
   albumExportProgress: { current: number; total: number } | null;
   onCreateAlbum: (name: string) => void;
   onCopyToExistingFolder: () => void;
+  /**
+   * Secondary "déplacer vers un dossier" action, reachable from any step via
+   * the "⋯" menu - for a photo that turns out to be sitting in the wrong
+   * sub-folder. Independent of every other selection concept.
+   */
+  moveToFolderUris: Set<string>;
+  onToggleMoveToFolder: (uri: string) => void;
+  movingToFolder: boolean;
+  moveToFolderProgress: { current: number; total: number } | null;
+  onMoveToNewFolder: (name: string) => void;
+  onMoveToExistingFolder: () => void;
 };
 
 type FlatViewer = { photos: HashedPhoto[]; index: number; title: string };
@@ -117,15 +128,25 @@ export default function ResultsScreen({
   albumExportProgress,
   onCreateAlbum,
   onCopyToExistingFolder,
+  moveToFolderUris,
+  onToggleMoveToFolder,
+  movingToFolder,
+  moveToFolderProgress,
+  onMoveToNewFolder,
+  onMoveToExistingFolder,
 }: Props) {
   const [viewerGroupIndex, setViewerGroupIndex] = useState<number | null>(null);
   const [viewerPhotoIndex, setViewerPhotoIndex] = useState(0);
   const [flatViewer, setFlatViewer] = useState<FlatViewer | null>(null);
   // "album"/"quality": whether the grid is filtered down to just the
-  // current selection, and the name-entry modal for creating the folder.
+  // current selection, and the destination-choice modal for the copy.
   const [showOnlyAlbum, setShowOnlyAlbum] = useState(false);
-  const [albumNameModalOpen, setAlbumNameModalOpen] = useState(false);
-  const [albumName, setAlbumName] = useState('');
+  const [albumFolderModalOpen, setAlbumFolderModalOpen] = useState(false);
+  // Secondary "déplacer vers un dossier" action, available from any step -
+  // its own little screen (see moveMode below), reached via the "⋯" menu.
+  const [secondaryMenuOpen, setSecondaryMenuOpen] = useState(false);
+  const [moveMode, setMoveMode] = useState(false);
+  const [moveFolderModalOpen, setMoveFolderModalOpen] = useState(false);
   // "moments" hand-editing: photos picked to move together, and whether
   // the "choose a group" picker is currently open for them.
   const [moveSelection, setMoveSelection] = useState<Set<string>>(new Set());
@@ -252,6 +273,10 @@ export default function ResultsScreen({
     const base = mode === 'album' ? sortByMomentOrder(allPhotos) : allPhotos;
     return showOnlyAlbum ? base.filter((p) => albumUris.has(p.uri)) : base;
   }, [allPhotos, mode, momentOrderIndex, albumUris, showOnlyAlbum]);
+  // "déplacer vers un dossier": every photo still in this analysis,
+  // regardless of which step it's normally organized under - moment order
+  // when one exists, same as the album.
+  const moveModePhotos = useMemo(() => sortByMomentOrder(allPhotos), [allPhotos, momentOrderIndex]);
 
   function isBlurry(photo: HashedPhoto): boolean {
     return isBlurryPhoto(photo, groupByUri.get(photo.uri) ?? null, sharpnessBaseline);
@@ -409,13 +434,20 @@ export default function ResultsScreen({
           <Pressable onPress={onBack} hitSlop={12}>
             <Text style={styles.backLink}>‹ Nouvelle analyse</Text>
           </Pressable>
-          {trashCount > 0 && (
-            <Pressable onPress={onOpenTrash} hitSlop={12} style={styles.trashLink}>
-              <Text style={styles.trashLinkText}>
-                🗑 Corbeille ({trashCount})
-              </Text>
-            </Pressable>
-          )}
+          <View style={styles.headerTopRowRight}>
+            {trashCount > 0 && (
+              <Pressable onPress={onOpenTrash} hitSlop={12} style={styles.trashLink}>
+                <Text style={styles.trashLinkText}>
+                  🗑 Corbeille ({trashCount})
+                </Text>
+              </Pressable>
+            )}
+            {!moveMode && (
+              <Pressable onPress={() => setSecondaryMenuOpen(true)} hitSlop={12} style={styles.moreButton}>
+                <Text style={styles.moreButtonText}>⋯</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
         {currentPartSteps.length > 1 && (
           <View style={styles.stepNav}>
@@ -476,6 +508,109 @@ export default function ResultsScreen({
         )}
       </View>
 
+      {moveMode && (
+        <>
+          {allPhotos.length === 0 ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptyText}>Il n'y a plus de photo dans ce dossier.</Text>
+            </View>
+          ) : (
+            <ScrollView contentContainerStyle={styles.list}>
+              <Text style={styles.instructions}>
+                Touche les photos à déplacer vers un autre dossier - pratique si tu remarques que
+                certaines sont mal placées. Touche la loupe pour voir en grand.
+              </Text>
+              <View style={styles.bulkActionsRow}>
+                <Pressable style={styles.selectAllButton} onPress={() => setMoveMode(false)}>
+                  <Text style={styles.selectAllButtonText}>✕ Annuler</Text>
+                </Pressable>
+              </View>
+              <View style={styles.blurGrid}>
+                {moveModePhotos.map((photo, index) => {
+                  const isMarked = moveToFolderUris.has(photo.uri);
+                  return (
+                    <Pressable
+                      key={photo.uri}
+                      style={styles.blurGridItem}
+                      onPress={() => onToggleMoveToFolder(photo.uri)}
+                    >
+                      <Image
+                        source={{ uri: photo.uri }}
+                        recyclingKey={photo.uri}
+                        style={[
+                          styles.thumb,
+                          styles.thumbWithBorderSlot,
+                          isMarked && styles.thumbAlbumSelected,
+                        ]}
+                        contentFit="cover"
+                      />
+                      {isMarked && (
+                        <View style={styles.albumBadge}>
+                          <Text style={styles.albumBadgeText}>📦</Text>
+                        </View>
+                      )}
+                      <Pressable
+                        style={styles.magnifyBadge}
+                        hitSlop={8}
+                        onPress={() =>
+                          openFlatViewer(moveModePhotos, index, 'Déplacer vers un dossier')
+                        }
+                      >
+                        <Text style={styles.magnifyBadgeText}>🔍</Text>
+                      </Pressable>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          )}
+          {allPhotos.length > 0 && (
+            <View style={styles.bottomBar}>
+              {movingToFolder ? (
+                <View style={styles.progressBlock}>
+                  <Text style={styles.progressText}>
+                    Déplacement en cours… {moveToFolderProgress?.current ?? 0} /{' '}
+                    {moveToFolderProgress?.total ?? 0}
+                  </Text>
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        {
+                          width: `${Math.round(
+                            ((moveToFolderProgress?.current ?? 0) /
+                              Math.max(moveToFolderProgress?.total ?? 1, 1)) *
+                              100
+                          )}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+              ) : (
+                <Pressable
+                  style={[
+                    styles.deleteButton,
+                    styles.albumCreateButton,
+                    moveToFolderUris.size === 0 && styles.deleteButtonDisabled,
+                  ]}
+                  disabled={moveToFolderUris.size === 0}
+                  onPress={() => setMoveFolderModalOpen(true)}
+                >
+                  <Text style={styles.deleteButtonText}>
+                    {moveToFolderUris.size === 0
+                      ? 'Touche des photos pour les choisir'
+                      : `📦 Déplacer ${moveToFolderUris.size} photo${moveToFolderUris.size > 1 ? 's' : ''} vers un dossier`}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+        </>
+      )}
+
+      {!moveMode && (
+        <>
       {mode === 'similar' && (
         <View style={styles.similaritySection}>
           <View style={styles.similarityLabelRow}>
@@ -1479,7 +1614,7 @@ export default function ResultsScreen({
                 albumUris.size === 0 && styles.deleteButtonDisabled,
               ]}
               disabled={albumUris.size === 0}
-              onPress={() => setAlbumNameModalOpen(true)}
+              onPress={() => setAlbumFolderModalOpen(true)}
             >
               <Text style={styles.deleteButtonText}>
                 {albumUris.size === 0
@@ -1520,6 +1655,8 @@ export default function ResultsScreen({
             </Pressable>
           </View>
         )}
+        </>
+      )}
 
       <Modal
         visible={viewerGroup !== null}
@@ -1579,13 +1716,17 @@ export default function ResultsScreen({
             laterUris={laterUris}
             keptUris={keptUris}
             onSetPhotoStatus={
-              mode === 'decide' || mode === 'later' || mode === 'momentsLater'
+              !moveMode && (mode === 'decide' || mode === 'later' || mode === 'momentsLater')
                 ? onSetPhotoStatus
                 : undefined
             }
             showLaterOption={mode !== 'later' && mode !== 'momentsLater'}
-            albumUris={mode === 'album' || mode === 'quality' ? albumUris : undefined}
-            onToggleAlbum={mode === 'album' || mode === 'quality' ? onToggleAlbum : undefined}
+            albumUris={!moveMode && (mode === 'album' || mode === 'quality') ? albumUris : undefined}
+            onToggleAlbum={
+              !moveMode && (mode === 'album' || mode === 'quality') ? onToggleAlbum : undefined
+            }
+            moveToFolderUris={moveMode ? moveToFolderUris : undefined}
+            onToggleMoveToFolder={moveMode ? onToggleMoveToFolder : undefined}
           />
         )}
       </Modal>
@@ -1660,58 +1801,55 @@ export default function ResultsScreen({
         </Pressable>
       </Modal>
 
+      <FolderDestinationModal
+        visible={albumFolderModalOpen}
+        onClose={() => setAlbumFolderModalOpen(false)}
+        title="Où mettre les photos ?"
+        hint="Dans les deux cas, les photos seront copiées, pas déplacées : rien ne change dans ton dossier d'origine."
+        existingFolderLabel="📂 Dans un dossier existant"
+        newFolderPlaceholder="Nom du nouveau dossier, ex. Vacances été 2026"
+        newFolderButtonLabel="📁 Créer ce nouveau dossier"
+        onChooseExisting={onCopyToExistingFolder}
+        onCreateNew={onCreateAlbum}
+      />
+
+      <FolderDestinationModal
+        visible={moveFolderModalOpen}
+        onClose={() => setMoveFolderModalOpen(false)}
+        title="Où déplacer les photos ?"
+        hint="Dans les deux cas, les photos seront déplacées : elles ne seront plus à leur emplacement actuel."
+        existingFolderLabel="📂 Dans un dossier existant"
+        newFolderPlaceholder="Nom du nouveau dossier"
+        newFolderButtonLabel="📁 Créer ce nouveau dossier"
+        onChooseExisting={onMoveToExistingFolder}
+        onCreateNew={onMoveToNewFolder}
+      />
+
       <Modal
-        visible={albumNameModalOpen}
+        visible={secondaryMenuOpen}
         animationType="fade"
         transparent
-        onRequestClose={() => setAlbumNameModalOpen(false)}
+        onRequestClose={() => setSecondaryMenuOpen(false)}
       >
-        <Pressable style={styles.movePickerBackdrop} onPress={() => setAlbumNameModalOpen(false)}>
-          <Pressable style={styles.albumNameSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.movePickerTitle}>Où mettre les photos ?</Text>
-            <Text style={styles.albumNameHint}>
-              Dans les deux cas, les photos seront copiées, pas déplacées : rien ne change dans ton
-              dossier d'origine.
-            </Text>
-
+        <Pressable style={styles.movePickerBackdrop} onPress={() => setSecondaryMenuOpen(false)}>
+          <Pressable style={styles.secondaryMenuSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.movePickerTitle}>Autres actions</Text>
             <Pressable
-              style={[styles.deleteButton, styles.albumCreateButton]}
+              style={styles.secondaryMenuItem}
               onPress={() => {
-                setAlbumNameModalOpen(false);
-                onCopyToExistingFolder();
+                setSecondaryMenuOpen(false);
+                setMoveMode(true);
               }}
             >
-              <Text style={styles.deleteButtonText}>📂 Dans un dossier existant</Text>
+              <Text style={styles.secondaryMenuItemText}>
+                📦 Déplacer des photos vers un dossier
+              </Text>
+              <Text style={styles.secondaryMenuItemHint}>
+                Pour une photo mal placée - choisis-la, puis son nouveau dossier.
+              </Text>
             </Pressable>
-
-            <Text style={styles.albumOrDivider}>ou</Text>
-
-            <TextInput
-              style={styles.albumNameInput}
-              value={albumName}
-              onChangeText={setAlbumName}
-              placeholder="Nom du nouveau dossier, ex. Vacances été 2026"
-              placeholderTextColor={colors.subtleText}
-            />
-            <Pressable
-              style={[
-                styles.deleteButton,
-                styles.albumCreateButton,
-                !albumName.trim() && styles.deleteButtonDisabled,
-              ]}
-              disabled={!albumName.trim()}
-              onPress={() => {
-                const name = albumName.trim();
-                setAlbumNameModalOpen(false);
-                setAlbumName('');
-                onCreateAlbum(name);
-              }}
-            >
-              <Text style={styles.deleteButtonText}>📁 Créer ce nouveau dossier</Text>
-            </Pressable>
-
-            <Pressable style={styles.movePickerCancel} onPress={() => setAlbumNameModalOpen(false)}>
-              <Text style={styles.movePickerCancelText}>Annuler</Text>
+            <Pressable style={styles.movePickerCancel} onPress={() => setSecondaryMenuOpen(false)}>
+              <Text style={styles.movePickerCancelText}>Fermer</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -1752,6 +1890,49 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 13,
     fontWeight: '600',
+  },
+  headerTopRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  moreButton: {
+    marginLeft: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  moreButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.subtleText,
+    marginTop: -6,
+  },
+  secondaryMenuSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+  },
+  secondaryMenuItem: {
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  secondaryMenuItemText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  secondaryMenuItemHint: {
+    fontSize: 12,
+    color: colors.subtleText,
+    lineHeight: 16,
   },
   stepNav: {
     flexDirection: 'row',
@@ -2295,34 +2476,5 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: colors.primary,
     borderRadius: 5,
-  },
-  albumNameSheet: {
-    backgroundColor: colors.card,
-    borderRadius: 20,
-    padding: 20,
-    width: '100%',
-  },
-  albumNameInput: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    fontSize: 15,
-    color: colors.text,
-    marginBottom: 10,
-  },
-  albumNameHint: {
-    fontSize: 12,
-    color: colors.subtleText,
-    lineHeight: 17,
-    marginBottom: 16,
-  },
-  albumOrDivider: {
-    textAlign: 'center',
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.subtleText,
-    marginVertical: 14,
   },
 });
