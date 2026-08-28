@@ -103,13 +103,14 @@ export default function App() {
     current: number;
     total: number;
   } | null>(null);
-  // Secondary "déplacer vers un dossier" action, reachable from any step
-  // via ResultsScreen's "•••" menu - for a photo that turns out to be
-  // sitting in the wrong sub-folder. Its own set, since it has nothing to
-  // do with the album/trash/keep/later marks.
-  const [moveToFolderUris, setMoveToFolderUris] = useState<Set<string>>(new Set());
-  const [movingToFolder, setMovingToFolder] = useState(false);
-  const [moveToFolderProgress, setMoveToFolderProgress] = useState<{
+  // Secondary "déplacer"/"copier vers un dossier" actions, reachable from
+  // any step via ResultsScreen's "•••" menu - e.g. for a photo that turns
+  // out to be sitting in the wrong sub-folder. Share one selection set and
+  // one progress tracker (only one of the two is ever in progress at a
+  // time) - independent of the album/trash/keep/later marks.
+  const [secondaryActionUris, setSecondaryActionUris] = useState<Set<string>>(new Set());
+  const [secondaryActionRunning, setSecondaryActionRunning] = useState(false);
+  const [secondaryActionProgress, setSecondaryActionProgress] = useState<{
     current: number;
     total: number;
   } | null>(null);
@@ -240,7 +241,7 @@ export default function App() {
       setLaterUris(new Set());
       setKeptUris(new Set());
       setAlbumUris(new Set());
-      setMoveToFolderUris(new Set());
+      setSecondaryActionUris(new Set());
       setReviewedGroupKeys(new Set());
       setScreen('results');
       await saveAnalysis({
@@ -513,8 +514,8 @@ export default function App() {
     );
   }
 
-  function toggleMoveToFolder(uri: string) {
-    setMoveToFolderUris((prev) => {
+  function toggleSecondaryAction(uri: string) {
+    setSecondaryActionUris((prev) => {
       const next = new Set(prev);
       if (next.has(uri)) next.delete(uri);
       else next.add(uri);
@@ -523,10 +524,10 @@ export default function App() {
   }
 
   /**
-   * Moves every photo currently marked in `moveToFolderUris` (either
-   * flavor below), after confirming - unlike the album's copy, this really
-   * does remove them from where they currently are, so it needs the same
-   * "are you sure" as jeter. Whichever ones actually moved get dropped from
+   * Moves every photo currently marked in `secondaryActionUris` (either
+   * flavor below), after confirming - unlike copying, this really does
+   * remove them from where they currently are, so it needs the same "are
+   * you sure" as jeter. Whichever ones actually moved get dropped from
    * every tracked list (hashedPhotos, momentGroups...), same as a jetée
    * photo, since their old URI is now gone; any that failed stay in place
    * to retry.
@@ -537,7 +538,7 @@ export default function App() {
       onProgress: (current: number, total: number) => void
     ) => Promise<{ movedUris: string[]; failedCount: number }>
   ) {
-    const toMove = hashedPhotos.filter((p) => moveToFolderUris.has(p.uri));
+    const toMove = hashedPhotos.filter((p) => secondaryActionUris.has(p.uri));
     if (toMove.length === 0) return;
     Alert.alert(
       'Déplacer ces photos ?',
@@ -547,12 +548,12 @@ export default function App() {
         {
           text: 'Déplacer',
           onPress: async () => {
-            setMovingToFolder(true);
-            setMoveToFolderProgress({ current: 0, total: toMove.length });
+            setSecondaryActionRunning(true);
+            setSecondaryActionProgress({ current: 0, total: toMove.length });
             try {
               const { movedUris, failedCount } = await move(
                 toMove.map((p) => ({ uri: p.uri, name: p.name })),
-                (current, total) => setMoveToFolderProgress({ current, total })
+                (current, total) => setSecondaryActionProgress({ current, total })
               );
               const handledUris = new Set(movedUris);
               const remaining = hashedPhotos.filter((p) => !handledUris.has(p.uri));
@@ -561,7 +562,7 @@ export default function App() {
                 .filter((g) => g.photos.length > 0);
               setHashedPhotos(remaining);
               setMomentGroups(prunedMomentGroups);
-              setMoveToFolderUris((prev) => {
+              setSecondaryActionUris((prev) => {
                 const next = new Set(prev);
                 handledUris.forEach((uri) => next.delete(uri));
                 return next;
@@ -591,8 +592,8 @@ export default function App() {
               console.warn('Erreur déplacement de photos', error);
               Alert.alert('Un souci est survenu', "Je n'ai pas réussi à déplacer les photos. Réessaie.");
             } finally {
-              setMovingToFolder(false);
-              setMoveToFolderProgress(null);
+              setSecondaryActionRunning(false);
+              setSecondaryActionProgress(null);
             }
           },
         },
@@ -601,7 +602,7 @@ export default function App() {
   }
 
   async function handleMoveToNewFolder(name: string) {
-    if (moveToFolderUris.size === 0) return;
+    if (secondaryActionUris.size === 0) return;
     const parentUri = await pickFolder(lastFolderUri);
     if (!parentUri) return;
     confirmAndMoveToFolder((photos, onProgress) =>
@@ -610,10 +611,73 @@ export default function App() {
   }
 
   async function handleMoveToExistingFolder() {
-    if (moveToFolderUris.size === 0) return;
+    if (secondaryActionUris.size === 0) return;
     const destUri = await pickFolder(lastFolderUri);
     if (!destUri) return;
     confirmAndMoveToFolder((photos, onProgress) => movePhotosToFolder(photos, destUri, onProgress));
+  }
+
+  /**
+   * Copies every photo currently marked in `secondaryActionUris` (either
+   * flavor below) - same idea as the album's copy, just from the "•••" menu
+   * instead of the dedicated album step, and using its own selection.
+   * Always safe: the originals are never touched, so no confirmation needed.
+   */
+  async function runSecondaryCopy(
+    copy: (
+      photos: { uri: string; name: string }[],
+      onProgress: (current: number, total: number) => void
+    ) => Promise<{ copiedCount: number; failedCount: number }>,
+    destinationLabel: string
+  ) {
+    const toExport = hashedPhotos.filter((p) => secondaryActionUris.has(p.uri));
+    if (toExport.length === 0) return;
+    setSecondaryActionRunning(true);
+    setSecondaryActionProgress({ current: 0, total: toExport.length });
+    try {
+      const { copiedCount, failedCount } = await copy(
+        toExport.map((p) => ({ uri: p.uri, name: p.name })),
+        (current, total) => setSecondaryActionProgress({ current, total })
+      );
+      setSecondaryActionUris(new Set());
+      if (failedCount === 0) {
+        Alert.alert(
+          'Photos copiées',
+          `${copiedCount} photo${copiedCount > 1 ? 's' : ''} copiée${copiedCount > 1 ? 's' : ''} ${destinationLabel}. Tes photos d'origine n'ont pas bougé.`
+        );
+      } else {
+        Alert.alert(
+          'Copie partielle',
+          `${copiedCount} photo${copiedCount > 1 ? 's' : ''} copiée${copiedCount > 1 ? 's' : ''}, mais ${failedCount} n'${failedCount > 1 ? 'ont' : 'a'} pas pu être copiée${failedCount > 1 ? 's' : ''}. Réessaie pour celles qui manquent.`
+        );
+      }
+    } catch (error) {
+      console.warn('Erreur copie de photos', error);
+      Alert.alert('Un souci est survenu', "Je n'ai pas réussi à copier les photos. Réessaie.");
+    } finally {
+      setSecondaryActionRunning(false);
+      setSecondaryActionProgress(null);
+    }
+  }
+
+  async function handleCopySelectedToNewFolder(name: string) {
+    if (secondaryActionUris.size === 0) return;
+    const parentUri = await pickFolder(lastFolderUri);
+    if (!parentUri) return;
+    await runSecondaryCopy(
+      (photos, onProgress) => copyPhotosToNewFolder(photos, parentUri, name, onProgress),
+      `dans "${name}"`
+    );
+  }
+
+  async function handleCopySelectedToExistingFolder() {
+    if (secondaryActionUris.size === 0) return;
+    const destUri = await pickFolder(lastFolderUri);
+    if (!destUri) return;
+    await runSecondaryCopy(
+      (photos, onProgress) => copyPhotosToFolder(photos, destUri, onProgress),
+      'dans le dossier choisi'
+    );
   }
 
   /** The "decide" step's three-way mark: keep (the default, clears both), later, or trash. */
@@ -971,12 +1035,14 @@ export default function App() {
             albumExportProgress={albumExportProgress}
             onCreateAlbum={handleCreateAlbum}
             onCopyToExistingFolder={handleCopyAlbumToExistingFolder}
-            moveToFolderUris={moveToFolderUris}
-            onToggleMoveToFolder={toggleMoveToFolder}
-            movingToFolder={movingToFolder}
-            moveToFolderProgress={moveToFolderProgress}
+            secondaryActionUris={secondaryActionUris}
+            onToggleSecondaryAction={toggleSecondaryAction}
+            secondaryActionRunning={secondaryActionRunning}
+            secondaryActionProgress={secondaryActionProgress}
             onMoveToNewFolder={handleMoveToNewFolder}
             onMoveToExistingFolder={handleMoveToExistingFolder}
+            onCopySelectedToNewFolder={handleCopySelectedToNewFolder}
+            onCopySelectedToExistingFolder={handleCopySelectedToExistingFolder}
           />
         )}
 

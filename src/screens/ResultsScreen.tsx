@@ -80,16 +80,20 @@ type Props = {
   onCreateAlbum: (name: string) => void;
   onCopyToExistingFolder: () => void;
   /**
-   * Secondary "déplacer vers un dossier" action, reachable from any step via
-   * the "⋯" menu - for a photo that turns out to be sitting in the wrong
-   * sub-folder. Independent of every other selection concept.
+   * Secondary "déplacer"/"copier vers un dossier" actions, reachable from
+   * any step via the "⋯" menu - e.g. for a photo that turns out to be
+   * sitting in the wrong sub-folder. Share one selection set (only one of
+   * the two is ever in progress at a time) - independent of every other
+   * selection concept.
    */
-  moveToFolderUris: Set<string>;
-  onToggleMoveToFolder: (uri: string) => void;
-  movingToFolder: boolean;
-  moveToFolderProgress: { current: number; total: number } | null;
+  secondaryActionUris: Set<string>;
+  onToggleSecondaryAction: (uri: string) => void;
+  secondaryActionRunning: boolean;
+  secondaryActionProgress: { current: number; total: number } | null;
   onMoveToNewFolder: (name: string) => void;
   onMoveToExistingFolder: () => void;
+  onCopySelectedToNewFolder: (name: string) => void;
+  onCopySelectedToExistingFolder: () => void;
 };
 
 type FlatViewer = { photos: HashedPhoto[]; index: number; title: string };
@@ -128,12 +132,14 @@ export default function ResultsScreen({
   albumExportProgress,
   onCreateAlbum,
   onCopyToExistingFolder,
-  moveToFolderUris,
-  onToggleMoveToFolder,
-  movingToFolder,
-  moveToFolderProgress,
+  secondaryActionUris,
+  onToggleSecondaryAction,
+  secondaryActionRunning,
+  secondaryActionProgress,
   onMoveToNewFolder,
   onMoveToExistingFolder,
+  onCopySelectedToNewFolder,
+  onCopySelectedToExistingFolder,
 }: Props) {
   const [viewerGroupIndex, setViewerGroupIndex] = useState<number | null>(null);
   const [viewerPhotoIndex, setViewerPhotoIndex] = useState(0);
@@ -142,11 +148,12 @@ export default function ResultsScreen({
   // current selection, and the destination-choice modal for the copy.
   const [showOnlyAlbum, setShowOnlyAlbum] = useState(false);
   const [albumFolderModalOpen, setAlbumFolderModalOpen] = useState(false);
-  // Secondary "déplacer vers un dossier" action, available from any step -
-  // its own little screen (see moveMode below), reached via the "⋯" menu.
+  // Secondary "déplacer"/"copier vers un dossier" actions, available from
+  // any step - their own little screen (see secondaryMode below), reached
+  // via the "⋯" menu. null means neither is active.
   const [secondaryMenuOpen, setSecondaryMenuOpen] = useState(false);
-  const [moveMode, setMoveMode] = useState(false);
-  const [moveFolderModalOpen, setMoveFolderModalOpen] = useState(false);
+  const [secondaryMode, setSecondaryMode] = useState<'move' | 'copy' | null>(null);
+  const [secondaryFolderModalOpen, setSecondaryFolderModalOpen] = useState(false);
   // "moments" hand-editing: photos picked to move together, and whether
   // the "choose a group" picker is currently open for them.
   const [moveSelection, setMoveSelection] = useState<Set<string>>(new Set());
@@ -273,10 +280,10 @@ export default function ResultsScreen({
     const base = mode === 'album' ? sortByMomentOrder(allPhotos) : allPhotos;
     return showOnlyAlbum ? base.filter((p) => albumUris.has(p.uri)) : base;
   }, [allPhotos, mode, momentOrderIndex, albumUris, showOnlyAlbum]);
-  // "déplacer vers un dossier": every photo still in this analysis,
-  // regardless of which step it's normally organized under - moment order
-  // when one exists, same as the album.
-  const moveModePhotos = useMemo(() => sortByMomentOrder(allPhotos), [allPhotos, momentOrderIndex]);
+  // "déplacer"/"copier vers un dossier": every photo still in this
+  // analysis, regardless of which step it's normally organized under -
+  // moment order when one exists, same as the album.
+  const secondaryModePhotos = useMemo(() => sortByMomentOrder(allPhotos), [allPhotos, momentOrderIndex]);
 
   function isBlurry(photo: HashedPhoto): boolean {
     return isBlurryPhoto(photo, groupByUri.get(photo.uri) ?? null, sharpnessBaseline);
@@ -442,7 +449,7 @@ export default function ResultsScreen({
                 </Text>
               </Pressable>
             )}
-            {!moveMode && (
+            {!secondaryMode && (
               <Pressable onPress={() => setSecondaryMenuOpen(true)} hitSlop={12} style={styles.moreButton}>
                 <Text style={styles.moreButtonText}>⋯</Text>
               </Pressable>
@@ -508,7 +515,7 @@ export default function ResultsScreen({
         )}
       </View>
 
-      {moveMode && (
+      {secondaryMode && (
         <>
           {allPhotos.length === 0 ? (
             <View style={styles.empty}>
@@ -517,22 +524,24 @@ export default function ResultsScreen({
           ) : (
             <ScrollView contentContainerStyle={styles.list}>
               <Text style={styles.instructions}>
-                Touche les photos à déplacer vers un autre dossier - pratique si tu remarques que
-                certaines sont mal placées. Touche la loupe pour voir en grand.
+                {secondaryMode === 'move'
+                  ? "Touche les photos à déplacer vers un autre dossier - pratique si tu remarques que certaines sont mal placées."
+                  : 'Touche les photos à copier vers un autre dossier.'}{' '}
+                Touche la loupe pour voir en grand.
               </Text>
               <View style={styles.bulkActionsRow}>
-                <Pressable style={styles.selectAllButton} onPress={() => setMoveMode(false)}>
+                <Pressable style={styles.selectAllButton} onPress={() => setSecondaryMode(null)}>
                   <Text style={styles.selectAllButtonText}>✕ Annuler</Text>
                 </Pressable>
               </View>
               <View style={styles.blurGrid}>
-                {moveModePhotos.map((photo, index) => {
-                  const isMarked = moveToFolderUris.has(photo.uri);
+                {secondaryModePhotos.map((photo, index) => {
+                  const isMarked = secondaryActionUris.has(photo.uri);
                   return (
                     <Pressable
                       key={photo.uri}
                       style={styles.blurGridItem}
-                      onPress={() => onToggleMoveToFolder(photo.uri)}
+                      onPress={() => onToggleSecondaryAction(photo.uri)}
                     >
                       <Image
                         source={{ uri: photo.uri }}
@@ -546,14 +555,20 @@ export default function ResultsScreen({
                       />
                       {isMarked && (
                         <View style={styles.albumBadge}>
-                          <Text style={styles.albumBadgeText}>📦</Text>
+                          <Text style={styles.albumBadgeText}>
+                            {secondaryMode === 'move' ? '📦' : '📄'}
+                          </Text>
                         </View>
                       )}
                       <Pressable
                         style={styles.magnifyBadge}
                         hitSlop={8}
                         onPress={() =>
-                          openFlatViewer(moveModePhotos, index, 'Déplacer vers un dossier')
+                          openFlatViewer(
+                            secondaryModePhotos,
+                            index,
+                            secondaryMode === 'move' ? 'Déplacer vers un dossier' : 'Copier vers un dossier'
+                          )
                         }
                       >
                         <Text style={styles.magnifyBadgeText}>🔍</Text>
@@ -566,11 +581,11 @@ export default function ResultsScreen({
           )}
           {allPhotos.length > 0 && (
             <View style={styles.bottomBar}>
-              {movingToFolder ? (
+              {secondaryActionRunning ? (
                 <View style={styles.progressBlock}>
                   <Text style={styles.progressText}>
-                    Déplacement en cours… {moveToFolderProgress?.current ?? 0} /{' '}
-                    {moveToFolderProgress?.total ?? 0}
+                    {secondaryMode === 'move' ? 'Déplacement' : 'Copie'} en cours…{' '}
+                    {secondaryActionProgress?.current ?? 0} / {secondaryActionProgress?.total ?? 0}
                   </Text>
                   <View style={styles.progressTrack}>
                     <View
@@ -578,8 +593,8 @@ export default function ResultsScreen({
                         styles.progressFill,
                         {
                           width: `${Math.round(
-                            ((moveToFolderProgress?.current ?? 0) /
-                              Math.max(moveToFolderProgress?.total ?? 1, 1)) *
+                            ((secondaryActionProgress?.current ?? 0) /
+                              Math.max(secondaryActionProgress?.total ?? 1, 1)) *
                               100
                           )}%`,
                         },
@@ -592,15 +607,15 @@ export default function ResultsScreen({
                   style={[
                     styles.deleteButton,
                     styles.albumCreateButton,
-                    moveToFolderUris.size === 0 && styles.deleteButtonDisabled,
+                    secondaryActionUris.size === 0 && styles.deleteButtonDisabled,
                   ]}
-                  disabled={moveToFolderUris.size === 0}
-                  onPress={() => setMoveFolderModalOpen(true)}
+                  disabled={secondaryActionUris.size === 0}
+                  onPress={() => setSecondaryFolderModalOpen(true)}
                 >
                   <Text style={styles.deleteButtonText}>
-                    {moveToFolderUris.size === 0
+                    {secondaryActionUris.size === 0
                       ? 'Touche des photos pour les choisir'
-                      : `📦 Déplacer ${moveToFolderUris.size} photo${moveToFolderUris.size > 1 ? 's' : ''} vers un dossier`}
+                      : `${secondaryMode === 'move' ? '📦 Déplacer' : '📄 Copier'} ${secondaryActionUris.size} photo${secondaryActionUris.size > 1 ? 's' : ''} vers un dossier`}
                   </Text>
                 </Pressable>
               )}
@@ -609,7 +624,7 @@ export default function ResultsScreen({
         </>
       )}
 
-      {!moveMode && (
+      {!secondaryMode && (
         <>
       {mode === 'similar' && (
         <View style={styles.similaritySection}>
@@ -1716,17 +1731,20 @@ export default function ResultsScreen({
             laterUris={laterUris}
             keptUris={keptUris}
             onSetPhotoStatus={
-              !moveMode && (mode === 'decide' || mode === 'later' || mode === 'momentsLater')
+              !secondaryMode && (mode === 'decide' || mode === 'later' || mode === 'momentsLater')
                 ? onSetPhotoStatus
                 : undefined
             }
             showLaterOption={mode !== 'later' && mode !== 'momentsLater'}
-            albumUris={!moveMode && (mode === 'album' || mode === 'quality') ? albumUris : undefined}
-            onToggleAlbum={
-              !moveMode && (mode === 'album' || mode === 'quality') ? onToggleAlbum : undefined
+            albumUris={
+              !secondaryMode && (mode === 'album' || mode === 'quality') ? albumUris : undefined
             }
-            moveToFolderUris={moveMode ? moveToFolderUris : undefined}
-            onToggleMoveToFolder={moveMode ? onToggleMoveToFolder : undefined}
+            onToggleAlbum={
+              !secondaryMode && (mode === 'album' || mode === 'quality') ? onToggleAlbum : undefined
+            }
+            secondaryActionUris={secondaryMode ? secondaryActionUris : undefined}
+            onToggleSecondaryAction={secondaryMode ? onToggleSecondaryAction : undefined}
+            secondaryActionKind={secondaryMode ?? undefined}
           />
         )}
       </Modal>
@@ -1814,15 +1832,21 @@ export default function ResultsScreen({
       />
 
       <FolderDestinationModal
-        visible={moveFolderModalOpen}
-        onClose={() => setMoveFolderModalOpen(false)}
-        title="Où déplacer les photos ?"
-        hint="Dans les deux cas, les photos seront déplacées : elles ne seront plus à leur emplacement actuel."
+        visible={secondaryFolderModalOpen}
+        onClose={() => setSecondaryFolderModalOpen(false)}
+        title={secondaryMode === 'move' ? 'Où déplacer les photos ?' : 'Où copier les photos ?'}
+        hint={
+          secondaryMode === 'move'
+            ? 'Dans les deux cas, les photos seront déplacées : elles ne seront plus à leur emplacement actuel.'
+            : "Dans les deux cas, les photos seront copiées, pas déplacées : rien ne change dans ton dossier d'origine."
+        }
         existingFolderLabel="📂 Dans un dossier existant"
         newFolderPlaceholder="Nom du nouveau dossier"
         newFolderButtonLabel="📁 Créer ce nouveau dossier"
-        onChooseExisting={onMoveToExistingFolder}
-        onCreateNew={onMoveToNewFolder}
+        onChooseExisting={
+          secondaryMode === 'move' ? onMoveToExistingFolder : onCopySelectedToExistingFolder
+        }
+        onCreateNew={secondaryMode === 'move' ? onMoveToNewFolder : onCopySelectedToNewFolder}
       />
 
       <Modal
@@ -1838,7 +1862,7 @@ export default function ResultsScreen({
               style={styles.secondaryMenuItem}
               onPress={() => {
                 setSecondaryMenuOpen(false);
-                setMoveMode(true);
+                setSecondaryMode('move');
               }}
             >
               <Text style={styles.secondaryMenuItemText}>
@@ -1846,6 +1870,18 @@ export default function ResultsScreen({
               </Text>
               <Text style={styles.secondaryMenuItemHint}>
                 Pour une photo mal placée - choisis-la, puis son nouveau dossier.
+              </Text>
+            </Pressable>
+            <Pressable
+              style={styles.secondaryMenuItem}
+              onPress={() => {
+                setSecondaryMenuOpen(false);
+                setSecondaryMode('copy');
+              }}
+            >
+              <Text style={styles.secondaryMenuItemText}>📄 Copier des photos vers un dossier</Text>
+              <Text style={styles.secondaryMenuItemHint}>
+                Choisis-les, puis un dossier - tes photos d'origine ne bougent pas.
               </Text>
             </Pressable>
             <Pressable style={styles.movePickerCancel} onPress={() => setSecondaryMenuOpen(false)}>

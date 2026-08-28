@@ -49,9 +49,10 @@ type Props = {
    *  both given in practice. */
   albumUris?: Set<string>;
   onToggleAlbum?: (uri: string) => void;
-  /** Secondary "déplacer vers un dossier" action - same idea as onToggleAlbum, takes priority over it. */
-  moveToFolderUris?: Set<string>;
-  onToggleMoveToFolder?: (uri: string) => void;
+  /** Secondary "déplacer"/"copier vers un dossier" action - same idea as onToggleAlbum, takes priority over it. */
+  secondaryActionUris?: Set<string>;
+  onToggleSecondaryAction?: (uri: string) => void;
+  secondaryActionKind?: 'move' | 'copy';
 };
 
 /**
@@ -94,8 +95,9 @@ function PhotoViewerContent({
   showLaterOption = true,
   albumUris,
   onToggleAlbum,
-  moveToFolderUris,
-  onToggleMoveToFolder,
+  secondaryActionUris,
+  onToggleSecondaryAction,
+  secondaryActionKind = 'move',
 }: Props) {
   const { width } = Dimensions.get('window');
   const insets = useSafeAreaInsets();
@@ -116,7 +118,7 @@ function PhotoViewerContent({
   const isSelected = selected.has(photo.uri);
   const isBlurry = blurryUris.has(photo.uri);
   const isInAlbum = albumUris?.has(photo.uri) ?? false;
-  const isMarkedToMove = moveToFolderUris?.has(photo.uri) ?? false;
+  const isMarkedForSecondaryAction = secondaryActionUris?.has(photo.uri) ?? false;
   // "keep" only ever comes from an explicit ❤️ tap (keptUris) - an
   // untouched photo is "undecided", not "keep" (see ResultsScreen's
   // photoStatus, which this mirrors) - so the ❤️ button doesn't look
@@ -266,13 +268,19 @@ function PhotoViewerContent({
               <Text style={styles.viewerStatusButtonText}>🗑 Jeter</Text>
             </Pressable>
           </View>
-        ) : onToggleMoveToFolder ? (
+        ) : onToggleSecondaryAction ? (
           <Pressable
-            style={[styles.trashToggle, isMarkedToMove && styles.albumToggleActive]}
-            onPress={() => onToggleMoveToFolder(photo.uri)}
+            style={[styles.trashToggle, isMarkedForSecondaryAction && styles.albumToggleActive]}
+            onPress={() => onToggleSecondaryAction(photo.uri)}
           >
             <Text style={styles.trashToggleText}>
-              {isMarkedToMove ? '📦 Sera déplacée (touche pour annuler)' : '📦 Déplacer cette photo'}
+              {secondaryActionKind === 'move'
+                ? isMarkedForSecondaryAction
+                  ? '📦 Sera déplacée (touche pour annuler)'
+                  : '📦 Déplacer cette photo'
+                : isMarkedForSecondaryAction
+                  ? '📄 Sera copiée (touche pour annuler)'
+                  : '📄 Copier cette photo'}
             </Text>
           </Pressable>
         ) : onToggleAlbum ? (
