@@ -88,6 +88,34 @@ export type ScanProgress = {
   scannedFolders: number;
 };
 
+export type SubfolderEntry = {
+  /** SAF content:// URI of the sub-folder. */
+  uri: string;
+  name: string;
+};
+
+/**
+ * Lists the immediate sub-folders of `rootUri` (not files, not anything
+ * nested deeper) - used to let the user pick which ones to include in an
+ * analysis, e.g. 2 out of 4, rather than always scanning everything under
+ * the folder she picks.
+ */
+export async function listSubfolders(rootUri: string): Promise<SubfolderEntry[]> {
+  const entries = await StorageAccessFramework.readDirectoryAsync(rootUri);
+  const folders: SubfolderEntry[] = [];
+  for (const entryUri of entries) {
+    const name = getDisplayName(entryUri);
+    if (isImageName(name) || name === SET_ASIDE_FOLDER_NAME) continue;
+    try {
+      await StorageAccessFramework.readDirectoryAsync(entryUri);
+      folders.push({ uri: entryUri, name });
+    } catch {
+      // Not a folder - some other file type, skip.
+    }
+  }
+  return folders;
+}
+
 /**
  * Recursively walks a SAF directory tree and collects every image file
  * found in it or any of its sub-folders.
@@ -98,10 +126,16 @@ export type ScanProgress = {
  * directly (skipping a wasted lookup), and anything else is probed by
  * attempting to list it as a directory - if that throws, it's a file we
  * don't care about (video, doc, etc).
+ *
+ * `includeSubfolderUris`, when given, limits which of `rootUri`'s immediate
+ * sub-folders get scanned (e.g. 2 out of 4, picked via listSubfolders) -
+ * loose images sitting directly in `rootUri` itself are always included
+ * regardless, since they were never part of that choice.
  */
 export async function scanFolderForImages(
   rootUri: string,
-  onProgress?: (progress: ScanProgress) => void
+  onProgress?: (progress: ScanProgress) => void,
+  includeSubfolderUris?: Set<string> | null
 ): Promise<ImageFile[]> {
   const images: ImageFile[] = [];
   let scannedFolders = 0;
@@ -133,6 +167,30 @@ export async function scanFolderForImages(
   }
 
   const rootEntries = await StorageAccessFramework.readDirectoryAsync(rootUri);
-  await walk(rootUri, rootEntries);
+
+  if (!includeSubfolderUris) {
+    await walk(rootUri, rootEntries);
+    return images;
+  }
+
+  // Filtered pass: only recurse into the chosen top-level sub-folders, but
+  // still pick up any loose image sitting directly at the root.
+  scannedFolders += 1;
+  onProgress?.({ foundImages: images.length, scannedFolders });
+  for (const entryUri of rootEntries) {
+    const name = getDisplayName(entryUri);
+    if (isImageName(name)) {
+      images.push({ uri: entryUri, name, folderPath: getFolderPath(entryUri) });
+      onProgress?.({ foundImages: images.length, scannedFolders });
+      continue;
+    }
+    if (!includeSubfolderUris.has(entryUri)) continue;
+    try {
+      const subEntries = await StorageAccessFramework.readDirectoryAsync(entryUri);
+      await walk(entryUri, subEntries);
+    } catch {
+      // Not a folder we can read - skip it.
+    }
+  }
   return images;
 }

@@ -22,7 +22,7 @@ import {
   type DuplicateGroup,
   type SortMode,
 } from './src/lib/duplicateGroups';
-import { pickFolder, scanFolderForImages } from './src/lib/imageFiles';
+import { listSubfolders, pickFolder, scanFolderForImages, type SubfolderEntry } from './src/lib/imageFiles';
 import { movePhotosToFolder, movePhotosToNewFolder } from './src/lib/movePhotos';
 import { hashPhoto, type HashedPhoto } from './src/lib/perceptualHash';
 import {
@@ -40,14 +40,22 @@ import {
 import HomeScreen from './src/screens/HomeScreen';
 import ResultsScreen from './src/screens/ResultsScreen';
 import ScanningScreen, { type ScanStatus } from './src/screens/ScanningScreen';
+import SubfolderPickerScreen from './src/screens/SubfolderPickerScreen';
 import TrashScreen from './src/screens/TrashScreen';
 import { colors } from './src/theme';
 
-type Screen = 'home' | 'scanning' | 'results' | 'trash';
+type Screen = 'home' | 'scanning' | 'results' | 'trash' | 'subfolders';
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('home');
   const [lastFolderUri, setLastFolderUriState] = useState<string | null>(null);
+  // While `screen === 'subfolders'`: the folder/mode waiting for her to
+  // pick which sub-folders to include, and the list to choose from.
+  const [pendingAnalysis, setPendingAnalysis] = useState<{
+    folderUri: string;
+    mode: SortMode;
+  } | null>(null);
+  const [subfolderOptions, setSubfolderOptions] = useState<SubfolderEntry[]>([]);
   const [scanStatus, setScanStatus] = useState<ScanStatus>({
     phase: 'listing',
     foundImages: 0,
@@ -165,14 +173,22 @@ export default function App() {
     setTrashEntries(await getTrashEntries());
   }
 
-  async function analyzeFolder(folderUri: string, forMode: SortMode) {
+  async function analyzeFolder(
+    folderUri: string,
+    forMode: SortMode,
+    subfolderFilter?: Set<string> | null
+  ) {
     setScreen('scanning');
     setScanStatus({ phase: 'listing', foundImages: 0, hashedCount: 0 });
 
     try {
-      const images = await scanFolderForImages(folderUri, (progress) => {
-        setScanStatus({ phase: 'listing', foundImages: progress.foundImages, hashedCount: 0 });
-      });
+      const images = await scanFolderForImages(
+        folderUri,
+        (progress) => {
+          setScanStatus({ phase: 'listing', foundImages: progress.foundImages, hashedCount: 0 });
+        },
+        subfolderFilter
+      );
 
       if (images.length === 0) {
         Alert.alert('Aucune photo trouvée', "Ce dossier ne contient pas de photo à analyser.");
@@ -302,13 +318,51 @@ export default function App() {
     });
   }
 
+  /**
+   * When the folder about to be analyzed has 2+ immediate sub-folders,
+   * offers to include just some of them (e.g. 2 out of 4) instead of always
+   * scanning everything underneath - useful on a big folder, and doubles as
+   * a way to check for duplicates across just the folders that matter right
+   * now. Skipped (straight to analyzing) when there's 0 or 1 sub-folder, so
+   * a simple folder stays exactly as fast as before.
+   */
+  async function maybeAskSubfolders(folderUri: string, forMode: SortMode) {
+    try {
+      const subfolders = await listSubfolders(folderUri);
+      if (subfolders.length < 2) {
+        await analyzeFolder(folderUri, forMode);
+        return;
+      }
+      setPendingAnalysis({ folderUri, mode: forMode });
+      setSubfolderOptions(subfolders);
+      setScreen('subfolders');
+    } catch (error) {
+      console.warn('Erreur listage sous-dossiers', error);
+      // Not being able to list them isn't worth blocking on - fall back to
+      // analyzing the whole thing like before.
+      await analyzeFolder(folderUri, forMode);
+    }
+  }
+
+  function handleConfirmSubfolders(selectedUris: string[]) {
+    if (!pendingAnalysis) return;
+    const { folderUri, mode: forMode } = pendingAnalysis;
+    setPendingAnalysis(null);
+    analyzeFolder(folderUri, forMode, new Set(selectedUris));
+  }
+
+  function handleCancelSubfolders() {
+    setPendingAnalysis(null);
+    setScreen('home');
+  }
+
   async function handlePickFolder(forMode: SortMode) {
     const proceed = await resolveTrashPrompt('Avant de lancer une nouvelle analyse, que veux-tu en faire ?');
     if (!proceed) return;
     try {
       const folderUri = await pickFolder(lastFolderUri);
       if (!folderUri) return;
-      await analyzeFolder(folderUri, forMode);
+      await maybeAskSubfolders(folderUri, forMode);
     } catch (error) {
       console.warn('Erreur choix dossier', error);
       Alert.alert('Un souci est survenu', "Je n'ai pas réussi à ouvrir ce dossier.");
@@ -318,7 +372,7 @@ export default function App() {
   async function handleRescanLastFolder(forMode: SortMode) {
     const proceed = await resolveTrashPrompt('Avant de lancer une nouvelle analyse, que veux-tu en faire ?');
     if (!proceed || !lastFolderUri) return;
-    analyzeFolder(lastFolderUri, forMode);
+    await maybeAskSubfolders(lastFolderUri, forMode);
   }
 
   async function handleFinishSorting() {
@@ -1012,6 +1066,14 @@ export default function App() {
             onPickFolder={handlePickFolder}
             onRescanLastFolder={handleRescanLastFolder}
             onOpenTrash={() => setScreen('trash')}
+          />
+        )}
+
+        {screen === 'subfolders' && (
+          <SubfolderPickerScreen
+            subfolders={subfolderOptions}
+            onConfirm={handleConfirmSubfolders}
+            onCancel={handleCancelSubfolders}
           />
         )}
 
