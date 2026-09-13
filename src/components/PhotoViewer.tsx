@@ -180,6 +180,7 @@ function PhotoViewerContent({
             <Image
               source={{ uri: p.uri }}
               recyclingKey={p.uri}
+              cachePolicy="memory-disk"
               style={styles.fullImage}
               contentFit="contain"
             />

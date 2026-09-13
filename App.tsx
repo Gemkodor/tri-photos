@@ -850,8 +850,25 @@ export default function App() {
               const prunedMomentGroups = momentGroups
                 .map((g) => ({ ...g, photos: g.photos.filter((p) => !handledUris.has(p.uri)) }))
                 .filter((g) => g.photos.length > 0);
+              // A group's "reviewed" mark is keyed by its exact photo
+              // content (see groupKey) - jeter one of its photos changes
+              // that content, so the mark would otherwise stop matching and
+              // the group would look unreviewed again even though nothing
+              // about the review itself changed (confirmed by Flavie: a
+              // group she'd marked "vu" reappeared the moment she actually
+              // jetait the photos in it). Carrying the mark forward to the
+              // group's new (smaller) key keeps it "vu" through that shrink.
+              const migratedReviewedKeys = new Set(reviewedGroupKeys);
+              groups.forEach((g) => {
+                if (!reviewedGroupKeys.has(groupKey(g))) return;
+                const stillThere = g.photos.filter((p) => !handledUris.has(p.uri));
+                if (stillThere.length > 0 && stillThere.length < g.photos.length) {
+                  migratedReviewedKeys.add(groupKey({ ...g, photos: stillThere }));
+                }
+              });
               setHashedPhotos(remaining);
               setMomentGroups(prunedMomentGroups);
+              setReviewedGroupKeys(migratedReviewedKeys);
               setSelected((prev) => {
                 const next = new Set(prev);
                 handledUris.forEach((uri) => next.delete(uri));
@@ -863,7 +880,7 @@ export default function App() {
                   folderUri: lastFolderUri,
                   similarityThreshold,
                   hashedPhotos: remaining,
-                  reviewedGroupKeys: Array.from(reviewedGroupKeys),
+                  reviewedGroupKeys: Array.from(migratedReviewedKeys),
                   mode,
                   momentGroups: prunedMomentGroups,
                 });

@@ -546,6 +546,7 @@ export default function ResultsScreen({
                       <Image
                         source={{ uri: photo.uri }}
                         recyclingKey={photo.uri}
+                      cachePolicy="memory-disk"
                         style={[
                           styles.thumb,
                           styles.thumbWithBorderSlot,
@@ -712,6 +713,7 @@ export default function ResultsScreen({
                     <Image
                       source={{ uri: photo.uri }}
                       recyclingKey={photo.uri}
+                      cachePolicy="memory-disk"
                       style={[
                         styles.thumb,
                         !isSelected && photoIsBlurry && styles.thumbBlurry,
@@ -795,6 +797,7 @@ export default function ResultsScreen({
                     <Image
                       source={{ uri: photo.uri }}
                       recyclingKey={photo.uri}
+                      cachePolicy="memory-disk"
                       style={[styles.thumb, styles.thumbBlurry, isSelected && styles.thumbSelected]}
                       contentFit="cover"
                     />
@@ -884,6 +887,7 @@ export default function ResultsScreen({
                     <Image
                       source={{ uri: photo.uri }}
                       recyclingKey={photo.uri}
+                      cachePolicy="memory-disk"
                       style={[
                         styles.thumb,
                         photoIsBlurry &&
@@ -988,6 +992,7 @@ export default function ResultsScreen({
                     <Image
                       source={{ uri: photo.uri }}
                       recyclingKey={photo.uri}
+                      cachePolicy="memory-disk"
                       style={[
                         styles.thumb,
                         photoIsBlurry && !isSelected && styles.thumbBlurry,
@@ -1097,12 +1102,14 @@ export default function ResultsScreen({
                 : group.photos.filter((p) => !keptUris.has(p.uri));
               if (visiblePhotos.length === 0) return null;
               const allChecked = visiblePhotos.every((p) => moveSelection.has(p.uri));
+              const isReviewed = reviewedGroupKeys.has(groupKey(group));
               return (
-                <View key={group.id} style={styles.groupCard}>
+                <View key={group.id} style={[styles.groupCard, isReviewed && styles.groupCardReviewed]}>
                   <View style={styles.groupHeaderRow}>
                     <Text style={styles.groupLabel}>
                       Moment {groupIndex + 1} · {group.photos.length} photo
                       {group.photos.length > 1 ? 's' : ''}
+                      {isReviewed ? ' · vu' : ''}
                     </Text>
                     <View style={styles.groupHeaderLinks}>
                       <Pressable
@@ -1150,6 +1157,11 @@ export default function ResultsScreen({
                           {allChecked ? 'Tout désélectionner' : 'Tout sélectionner'}
                         </Text>
                       </Pressable>
+                      <Pressable hitSlop={8} onPress={() => onMarkGroupReviewed(groupKey(group))}>
+                        <Text style={styles.groupSelectLink}>
+                          {isReviewed ? '✓ Vu' : '✓ Marquer vu'}
+                        </Text>
+                      </Pressable>
                     </View>
                   </View>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -1163,6 +1175,7 @@ export default function ResultsScreen({
                           <Image
                             source={{ uri: photo.uri }}
                       recyclingKey={photo.uri}
+                      cachePolicy="memory-disk"
                             style={[
                               styles.thumb,
                               photoIsBlurry &&
@@ -1282,6 +1295,7 @@ export default function ResultsScreen({
                     <Image
                       source={{ uri: photo.uri }}
                       recyclingKey={photo.uri}
+                      cachePolicy="memory-disk"
                       style={[
                         styles.thumb,
                         styles.thumbWithBorderSlot,
@@ -1489,6 +1503,7 @@ export default function ResultsScreen({
                         <Image
                           source={{ uri: photo.uri }}
                       recyclingKey={photo.uri}
+                      cachePolicy="memory-disk"
                           style={[
                             styles.thumb,
                             !keepMode && isSelected && styles.thumbSelected,
@@ -1800,6 +1815,7 @@ export default function ResultsScreen({
                       <Image
                         source={{ uri: first?.uri }}
                         recyclingKey={first?.uri}
+                        cachePolicy="memory-disk"
                         style={styles.movePickerThumb}
                         contentFit="cover"
                       />

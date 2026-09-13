@@ -75,6 +75,7 @@ export default function TrashScreen({
                 <Image
                   source={{ uri: item.uri }}
                   recyclingKey={item.uri}
+                  cachePolicy="memory-disk"
                   style={styles.thumb}
                   contentFit="cover"
                 />
