@@ -1,3 +1,4 @@
+import { useKeepAwake } from 'expo-keep-awake';
 import { Image } from 'expo-image';
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -13,6 +14,14 @@ export type ScanStatus = {
 };
 
 export default function ScanningScreen({ status }: { status: ScanStatus }) {
+  // The actual photo analysis runs inside a hidden WebView (see HashWorker) -
+  // Android pauses a WebView's own JavaScript the moment its screen turns
+  // off or the app is backgrounded, regardless of any foreground service,
+  // which is what was actually stopping the scan (not the missing
+  // notification alone). This can't prevent that for a deliberate lock or
+  // app-switch, but it does stop the screen from timing out and locking on
+  // its own while this screen is showing, which was likely happening too.
+  useKeepAwake();
   const isHashing = status.phase === 'hashing';
   const total = Math.max(status.foundImages, 1);
   const progress = isHashing ? Math.min(status.hashedCount / total, 1) : 0;
