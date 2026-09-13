@@ -1,8 +1,18 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
-import type { HashWorkerHandle } from '../components/HashWorker';
+import { FACE_DETECT_SIZE, type HashWorkerHandle } from '../components/HashWorker';
 import type { ImageFile } from './imageFiles';
 import { extractTimestampFromName } from './photoTimestamp';
+import {
+  computeHashBits,
+  computeSharpnessInRegion,
+  decodePngToGrayscale,
+  downsampleGrayscale,
+} from './pixelAnalysis';
+
+/** Plain hash grid size (17x16 -> 256 dHash bits, see duplicateGroups.ts's HASH_BITS). */
+const HASH_GRID_WIDTH = 17;
+const HASH_GRID_HEIGHT = 16;
 
 export type HashedPhoto = {
   uri: string;
@@ -41,9 +51,11 @@ function describeError(e: unknown): string {
 }
 
 /**
- * Copies a SAF photo locally, computes its dHash via the WebView worker, and
- * cleans up the local temp copy - regardless of any photo's file being huge,
- * only a tiny 9x8 thumbnail ever crosses into JS.
+ * Copies a SAF photo locally, computes its dHash/sharpness (plain JS, see
+ * pixelAnalysis.ts) and, when needed, its face region (the `worker`, still
+ * WebView-based - see HashWorker.tsx), then cleans up the local temp copy -
+ * regardless of any photo's file being huge, only a small resized render
+ * ever gets decoded.
  *
  * Returns the failure reason alongside a null photo (rather than silently
  * swallowing it) so a total analysis failure can show *why* instead of just
@@ -88,27 +100,41 @@ export async function hashPhoto(
       }
     }
 
-    // Resized to 256x256 (not the final 9x8 hash size) so the worker still
-    // has enough real detail left to judge sharpness - too small a source
-    // and blur differences get smoothed away before they can be measured.
-    // The worker itself shrinks this further for each purpose. When
-    // sharpness isn't needed at all (duplicates pass), a much smaller
-    // resize is plenty for the 9x8 hash and is faster to produce and send.
-    let base64: string | undefined;
+    // The duplicates-only pass resizes straight to the final 17x16 hash
+    // grid - a native resize (expo-image-manipulator), not a WebView, so
+    // this is as fast a path as there is. When sharpness is needed too, a
+    // single bigger 220x220 render is decoded once and reused both for the
+    // hash (downsampled in plain JS below) and for measuring blur - real
+    // detail would get smoothed away by resizing straight to 17x16 first.
+    let metrics: { hash: string; sharpness: number; facesFound: boolean };
     try {
-      const size = needSharpness ? 256 : 32;
-      const context = ImageManipulator.manipulate(localUri);
-      const rendered = await context.resize({ width: size, height: size }).renderAsync();
-      const saved = await rendered.saveAsync({ format: SaveFormat.PNG, base64: true });
-      base64 = saved.base64;
-    } catch (e) {
-      return { photo: null, error: `redimensionnement : ${describeError(e)}` };
-    }
-    if (!base64) return { photo: null, error: 'redimensionnement : pas de résultat' };
+      if (!needSharpness) {
+        const rendered = await ImageManipulator.manipulate(localUri)
+          .resize({ width: HASH_GRID_WIDTH, height: HASH_GRID_HEIGHT })
+          .renderAsync();
+        const saved = await rendered.saveAsync({ format: SaveFormat.PNG, base64: true });
+        if (!saved.base64) return { photo: null, error: 'redimensionnement : pas de résultat' };
+        const decoded = decodePngToGrayscale(saved.base64);
+        metrics = { hash: computeHashBits(decoded.gray), sharpness: 0, facesFound: false };
+      } else {
+        const rendered = await ImageManipulator.manipulate(localUri)
+          .resize({ width: FACE_DETECT_SIZE, height: FACE_DETECT_SIZE })
+          .renderAsync();
+        const saved = await rendered.saveAsync({ format: SaveFormat.PNG, base64: true });
+        if (!saved.base64) return { photo: null, error: 'redimensionnement : pas de résultat' };
+        const decoded = decodePngToGrayscale(saved.base64);
+        const hashGray = downsampleGrayscale(decoded, HASH_GRID_WIDTH, HASH_GRID_HEIGHT);
+        const hash = computeHashBits(hashGray);
 
-    let metrics;
-    try {
-      metrics = await worker.computeMetrics(base64, { needSharpness });
+        // Never rejects/hangs (see HashWorker.detectFace) - a photo processed
+        // while the app is backgrounded just falls back to whole-image
+        // sharpness below, same as a photo with no detectable face.
+        const faceRegion = await worker.detectFace(saved.base64);
+        const sharpness = faceRegion
+          ? computeSharpnessInRegion(decoded, faceRegion.x, faceRegion.y, faceRegion.w, faceRegion.h)
+          : computeSharpnessInRegion(decoded, 0, 0, decoded.width, decoded.height);
+        metrics = { hash, sharpness, facesFound: !!faceRegion };
+      }
     } catch (e) {
       return { photo: null, error: `analyse visuelle : ${describeError(e)}` };
     }

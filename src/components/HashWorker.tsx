@@ -9,47 +9,28 @@ import {
   TF_JS_SOURCE,
 } from '../assets/faceModel.generated';
 
-// Was off for a while: every way tried to load face detection into this
-// WebView kept timing out on every single photo, not just face detection,
-// which looked like tf.js/blazeface itself being too much for the WebView.
-// The real cause turned out to be unrelated - a stale-closure bug in this
-// file's own "ready" handling (see readyRef below) that could make the very
-// first photo's job never get sent at all, regardless of what was or
-// wasn't loaded. Now that that's fixed, back on.
+/**
+ * This used to also compute the perceptual hash and whole-image sharpness -
+ * that math now runs in plain JS (see pixelAnalysis.ts), specifically so it
+ * survives Android pausing this WebView's own JavaScript the instant the
+ * screen locks or the app is backgrounded (a foreground service keeps the
+ * *app* alive, but doesn't stop a WebView's timers/scripts from being
+ * suspended while it isn't visible - confirmed the real cause of analysis
+ * stalling in the background, not just Expo Go). Only face detection is
+ * left here, since blazeface genuinely needs this WebView's tf.js - and
+ * `detectFace` below never rejects or hangs forever waiting on it: a photo
+ * processed while backgrounded just falls back to whole-image sharpness,
+ * the same as any photo with no detectable face.
+ */
 const FACE_DETECTION_ENABLED = true;
 
 const FACE_MODEL_DIR = (FileSystem.cacheDirectory ?? '') + 'facemodel/';
-
-/**
- * Writes tf.js, blazeface, and the blazeface model out as real files instead
- * of embedding them inline in the WebView's HTML: that inline HTML crosses
- * into the native WebView as a single message, and Android has a hard cap
- * on how much data that can carry at once (around 1MB) - comfortably over
- * that (the embedded libraries alone are ~1.5MB) silently broke the page
- * load, which was hanging (and eventually timing out) every single photo,
- * not just face detection. Loading them as files the WebView reads off disk
- * itself has no such limit.
- */
-// Only the JS libraries are written as files - loading them via <script
-// src> works fine against a local file:// baseUrl. The model itself
-// (topology + weights, embedded inline further below via tf.io.fromMemory)
-// is NOT written as a file: tf.js's normal model loading uses fetch()
-// internally, and fetch() to a local file:// URL fails on Android WebView
-// ("TypeError: Failed to fetch") even with file access otherwise enabled -
-// a different, stricter code path than <script src>'s resource loading.
 const FACE_MODEL_FILES = ['tf.min.js', 'blazeface.min.js'];
+/** Must match pixelAnalysis's sharpness render size - a face box found here is used directly against that image. */
+export const FACE_DETECT_SIZE = 220;
 
 async function ensureFaceModelFiles(): Promise<void> {
   if (!FACE_DETECTION_ENABLED) return;
-
-  // Written once and reused across scans/app launches (same cache directory
-  // each time) - re-writing ~2MB before every single scan would be
-  // wasteful. Checks every file, not just one: an earlier attempt could
-  // have been interrupted partway through (e.g. the app was closed mid-scan
-  // during testing), leaving some files present and others missing - which
-  // would silently and permanently fail every face detection from then on,
-  // since a single missing file (like the library itself) breaks the
-  // <script src> chain that depends on it.
   const infos = await Promise.all(
     FACE_MODEL_FILES.map((name) => FileSystem.getInfoAsync(FACE_MODEL_DIR + name))
   );
@@ -62,44 +43,12 @@ async function ensureFaceModelFiles(): Promise<void> {
   ]);
 }
 
-// Difference-hash (dHash): the tiny image is 17x16 pixels; for each of the
-// 16 rows we compare 16 adjacent pixel pairs, giving a 256-bit fingerprint
-// (must match HASH_BITS in duplicateGroups.ts) that's stable across
-// resizing, re-compression and minor quality loss - exactly the kind of
-// "same photo, different copy" duplicates we need to catch. Originally 9x8
-// (64 bits) - too coarse once folders got into the hundreds of photos:
-// with that many pairwise comparisons, even a small per-pair coincidence
-// rate produced real false matches between unrelated photos.
-//
-// Sharpness: separately drawn at 220x220 (much bigger than the 17x16 hash) so
-// there's enough real detail to measure blur via the variance of the
-// Laplacian (a standard blur-detection trick - blurry images have weaker
-// edges, so the second-derivative response varies less across the image).
-//
-// Face-aware sharpness: a photo with a sharp, detailed background but an
-// out-of-focus face used to score as "sharp" overall, which is backwards for
-// photos of people. When a face can be found (via BlazeFace), sharpness is
-// measured just in the face area instead of the whole frame. If no face is
-// found, it falls back to whole-image sharpness like before.
-//
-// tf.js, blazeface, and the blazeface model weights are all vendored into
-// the app (see ../assets/faceModel.generated.ts, written to disk by
-// ensureFaceModelFiles above) rather than fetched from a CDN at scan time:
-// this used to make a real network call for every scan, and on a slow
-// connection that call could block the page from finishing load at all -
-// which blocked hashing every photo behind it, not just face detection.
-// They're loaded here as plain local files (not embedded inline in this
-// HTML) because the inline HTML has to cross into the native WebView as a
-// single message, and Android caps how much that can carry at once - these
-// libraries alone are bigger than that cap. Local files the WebView reads
-// off disk itself have no such limit, and still need no internet connection.
-const ANALYZE_HTML = `
+const DETECT_HTML = `
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8" /></head>
 <body style="margin:0">
-<canvas id="c" width="17" height="16" style="display:none"></canvas>
-<canvas id="b" width="220" height="220" style="display:none"></canvas>
+<canvas id="b" width="${FACE_DETECT_SIZE}" height="${FACE_DETECT_SIZE}" style="display:none"></canvas>
 ${
   FACE_DETECTION_ENABLED
     ? `<script src="tf.min.js"></script>
@@ -107,21 +56,15 @@ ${
     : ''
 }
 <script>
-  var hashCanvas = document.getElementById('c');
-  var hashCtx = hashCanvas.getContext('2d');
   var blurCanvas = document.getElementById('b');
   var blurCtx = blurCanvas.getContext('2d');
-  var BLUR_SIZE = 220;
+  var BLUR_SIZE = ${FACE_DETECT_SIZE};
 
   var faceModel = null;
   var faceModelFailed = false;
   ${
     FACE_DETECTION_ENABLED
-      ? `// The model itself (topology + weights) is embedded inline here and
-  // loaded via tf.io.fromMemory - not fetched from a file, since fetch()
-  // to a local file:// URL fails on Android WebView (confirmed: "Failed to
-  // fetch") even though <script src> to the same kind of URL works fine.
-  var BLAZEFACE_MODEL_JSON = ${JSON.stringify(BLAZEFACE_MODEL_JSON)};
+      ? `var BLAZEFACE_MODEL_JSON = ${JSON.stringify(BLAZEFACE_MODEL_JSON)};
   var BLAZEFACE_WEIGHTS_BASE64 = ${JSON.stringify(BLAZEFACE_WEIGHTS_BASE64)};
 
   function base64ToArrayBuffer(base64) {
@@ -170,61 +113,9 @@ ${
     window.ReactNativeWebView.postMessage(JSON.stringify(message));
   }
 
-  function computeHashBits() {
-    var data = hashCtx.getImageData(0, 0, 17, 16).data;
-    var gray = new Array(17 * 16);
-    for (var i = 0; i < gray.length; i++) {
-      gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
-    }
-    var bits = '';
-    for (var y = 0; y < 16; y++) {
-      for (var x = 0; x < 16; x++) {
-        bits += gray[y * 17 + x] < gray[y * 17 + x + 1] ? '1' : '0';
-      }
-    }
-    return bits;
-  }
-
-  // Laplacian variance restricted to a sub-rectangle of the blur canvas -
-  // same math as before, just optionally zoomed into the face area.
-  function computeSharpnessInRegion(rx, ry, rw, rh) {
-    var data = blurCtx.getImageData(0, 0, BLUR_SIZE, BLUR_SIZE).data;
-    var w = BLUR_SIZE;
-    var x0 = Math.max(1, rx);
-    var y0 = Math.max(1, ry);
-    var x1 = Math.min(w - 2, rx + rw);
-    var y1 = Math.min(BLUR_SIZE - 2, ry + rh);
-    if (x1 <= x0 || y1 <= y0) {
-      x0 = 1; y0 = 1; x1 = w - 2; y1 = BLUR_SIZE - 2;
-    }
-
-    function gray(px, py) {
-      var idx = (py * w + px) * 4;
-      return 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-    }
-
-    var lap = [];
-    for (var y = y0; y <= y1; y++) {
-      for (var x = x0; x <= x1; x++) {
-        lap.push(gray(x - 1, y) + gray(x + 1, y) + gray(x, y - 1) + gray(x, y + 1) - 4 * gray(x, y));
-      }
-    }
-    var n = lap.length;
-    var mean = 0;
-    for (var k = 0; k < n; k++) mean += lap[k];
-    mean /= n;
-    var variance = 0;
-    for (var k = 0; k < n; k++) {
-      var d = lap[k] - mean;
-      variance += d * d;
-    }
-    return variance / n;
-  }
-
-  // Never lets a slow/hung face-detection call (bad network, a WebView with
-  // broken WebGL, etc.) block the analysis of a photo - whatever happens,
-  // this settles within FACE_TIMEOUT_MS and analysis falls back to
-  // whole-image sharpness for that photo.
+  // Never lets a slow/hung face-detection call block anything - whatever
+  // happens, this settles within FACE_TIMEOUT_MS and detection is reported
+  // as "no face" for that photo.
   var FACE_TIMEOUT_MS = 4000;
   function withTimeout(promise, ms) {
     return new Promise(function (resolve) {
@@ -266,11 +157,6 @@ ${
         maxX = Math.max(maxX, p.bottomRight[0]);
         maxY = Math.max(maxY, p.bottomRight[1]);
       }
-      // A little padding around the detected box so the measured region
-      // isn't literally just eyes/nose/mouth (too small and flat to judge
-      // sharpness well) - but not so much that it starts pulling in the
-      // background around the face, which would defeat the point of
-      // measuring the face specifically instead of the whole photo.
       var padX = (maxX - minX) * 0.15;
       var padY = (maxY - minY) * 0.15;
       minX = Math.max(0, minX - padX);
@@ -288,46 +174,27 @@ ${
     }
   }
 
-  function handleAnalyze(id, base64, needSharpness) {
+  function handleDetect(id, base64) {
     var img = new Image();
     img.onload = async function () {
       try {
-        hashCtx.clearRect(0, 0, 17, 16);
-        hashCtx.drawImage(img, 0, 0, 17, 16);
-        var hash = computeHashBits();
-
-        // The duplicates step only ever needs the hash - skipping the
-        // sharpness/face-detection work entirely keeps that step (often run
-        // first, on a big folder with lots of subfolders) as fast and
-        // simple as possible.
-        if (!needSharpness) {
-          post({ id: id, hash: hash, sharpness: 0, facesFound: false });
-          return;
-        }
-
         blurCtx.clearRect(0, 0, BLUR_SIZE, BLUR_SIZE);
         blurCtx.drawImage(img, 0, 0, BLUR_SIZE, BLUR_SIZE);
-
-        var faceRegion = await detectFaceRegion();
-        var sharpness = faceRegion
-          ? computeSharpnessInRegion(faceRegion.x, faceRegion.y, faceRegion.w, faceRegion.h)
-          : computeSharpnessInRegion(0, 0, BLUR_SIZE, BLUR_SIZE);
-
-        post({ id: id, hash: hash, sharpness: sharpness, facesFound: !!faceRegion });
+        var region = await detectFaceRegion();
+        post({ id: id, region: region });
       } catch (e) {
-        post({ id: id, error: String(e) });
+        post({ id: id, region: null, error: String(e) });
       }
     };
     img.onerror = function () {
-      post({ id: id, error: 'decode_failed' });
+      post({ id: id, region: null, error: 'decode_failed' });
     };
     img.src = 'data:image/png;base64,' + base64;
   }
 
   // The WebView's own onLoadEnd event is unreliable for source={{ html }}
-  // content on Android (a known react-native-webview issue - it can just
-  // never fire even though the page loaded fine) - so the page announces
-  // its own readiness instead of relying on that.
+  // content on Android (a known react-native-webview issue) - so the page
+  // announces its own readiness instead of relying on that.
   post({ ready: true });
   true;
 </script>
@@ -335,69 +202,51 @@ ${
 </html>
 `;
 
-export type PhotoMetrics = {
-  /** 256-bit dHash, as a string of '0'/'1' characters. */
-  hash: string;
-  /** Variance of the Laplacian - higher means sharper. Only meaningful when
-   *  comparing photos of the same scene against each other. */
-  sharpness: number;
-  /** Whether the sharpness score above was measured on a detected face
-   *  instead of the whole photo. */
-  facesFound: boolean;
-};
+export type FaceRegion = { x: number; y: number; w: number; h: number };
 
 type PendingEntry = {
-  resolve: (metrics: PhotoMetrics) => void;
-  reject: (err: Error) => void;
+  resolve: (region: FaceRegion | null) => void;
   timeout: ReturnType<typeof setTimeout>;
 };
 
 export type HashWorkerHandle = {
   /**
-   * Computes the dHash and, unless `needSharpness` is explicitly false, a
-   * sharpness score for a tiny base64-encoded PNG. Skipping sharpness (the
-   * duplicates step doesn't use it at all) keeps that step as fast and
-   * simple as possible.
+   * Looks for a face in a base64-encoded PNG already resized to
+   * FACE_DETECT_SIZE x FACE_DETECT_SIZE. Never rejects and never hangs
+   * forever - resolves null (same as "no face found") if the WebView is
+   * slow, paused (e.g. app backgrounded), or anything else goes wrong, so
+   * the caller can always fall back to whole-image sharpness rather than
+   * getting stuck waiting.
    */
-  computeMetrics: (
-    base64Png: string,
-    options?: { needSharpness?: boolean }
-  ) => Promise<PhotoMetrics>;
+  detectFace: (base64Png: string) => Promise<FaceRegion | null>;
   /** Why face detection did or didn't come up during this scan, for on-screen debugging. */
   getFaceModelDiagnostic: () => string | null;
 };
 
-const REQUEST_TIMEOUT_MS = 25000;
+/**
+ * Generous while the app is in the foreground (a slow phone or a big model
+ * load shouldn't cost a false "no face"), but this is exactly the timer
+ * that keeps the analysis moving when the WebView itself is suspended in
+ * the background - it lives here in the calling JS, not inside the
+ * WebView's own withTimeout, since a fully paused WebView can't even run
+ * its own setTimeout to rescue itself.
+ */
+const REQUEST_TIMEOUT_MS = 8000;
 
 const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
   const webViewRef = useRef<WebView>(null);
   const [assetsReady, setAssetsReady] = useState(false);
-  // A ref, not state: flushQueue and the timeout handler below both need
-  // the *current* value the instant the "ready" message arrives, but a
-  // function defined during an earlier render only ever sees the `ready`
-  // state as it was at that render - calling setReady(true) doesn't change
-  // what an already-created closure reads. That mismatch meant the very
-  // first photo's job could be queued, "ready" could arrive right after,
-  // and flushQueue (called from that same stale closure) would still see
-  // ready=false and never actually send it - a guaranteed timeout on every
-  // single scan. A ref's .current is always the latest value, closure or not.
   const readyRef = useRef(false);
   const pending = useRef<Map<number, PendingEntry>>(new Map());
   const nextId = useRef(0);
-  const queue = useRef<Array<{ id: number; base64: string; needSharpness: boolean }>>([]);
-  // Tracks *why* the page never responded, for when a request times out -
-  // "the WebView's page never finished loading" vs "it crashed" vs "it
-  // loaded fine but never answered" are very different problems to chase,
-  // and a bare "hash_timeout" can't tell them apart.
-  const diagnosis = useRef<string | null>(null);
+  const queue = useRef<Array<{ id: number; base64: string }>>([]);
   const faceModelDiagnostic = useRef<string | null>(FACE_DETECTION_ENABLED ? null : 'désactivée');
 
   useEffect(() => {
     let cancelled = false;
     ensureFaceModelFiles()
       .catch(() => {
-        // Face detection just won't be available this scan - hashing itself
-        // doesn't depend on any of this.
+        // Face detection just won't be available this scan - not critical.
       })
       .finally(() => {
         if (!cancelled) setAssetsReady(true);
@@ -413,24 +262,21 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
     queue.current = [];
     for (const job of jobs) {
       webViewRef.current?.injectJavaScript(
-        `handleAnalyze(${JSON.stringify(job.id)}, ${JSON.stringify(job.base64)}, ${job.needSharpness}); true;`
+        `handleDetect(${JSON.stringify(job.id)}, ${JSON.stringify(job.base64)}); true;`
       );
     }
   }
 
   useImperativeHandle(ref, () => ({
-    computeMetrics(base64Png: string, options?: { needSharpness?: boolean }) {
+    detectFace(base64Png: string) {
       const id = nextId.current++;
-      const needSharpness = options?.needSharpness ?? true;
-      return new Promise<PhotoMetrics>((resolve, reject) => {
+      return new Promise<FaceRegion | null>((resolve) => {
         const timeout = setTimeout(() => {
           pending.current.delete(id);
-          const reason =
-            diagnosis.current ?? (readyRef.current ? 'page chargée mais muette' : 'page jamais chargée');
-          reject(new Error(`hash_timeout (${reason})`));
+          resolve(null);
         }, REQUEST_TIMEOUT_MS);
-        pending.current.set(id, { resolve, reject, timeout });
-        queue.current.push({ id, base64: base64Png, needSharpness });
+        pending.current.set(id, { resolve, timeout });
+        queue.current.push({ id, base64: base64Png });
         flushQueue();
       });
     },
@@ -444,10 +290,7 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
       const payload = JSON.parse(event.nativeEvent.data) as {
         id?: number;
         ready?: boolean;
-        hash?: string;
-        sharpness?: number;
-        facesFound?: boolean;
-        error?: string;
+        region?: FaceRegion | null;
         faceModelStatus?: 'ok' | 'failed';
         faceModelError?: string;
       };
@@ -466,15 +309,7 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
       if (!entry) return;
       pending.current.delete(payload.id);
       clearTimeout(entry.timeout);
-      if (payload.hash && payload.sharpness !== undefined) {
-        entry.resolve({
-          hash: payload.hash,
-          sharpness: payload.sharpness,
-          facesFound: !!payload.facesFound,
-        });
-      } else {
-        entry.reject(new Error(payload.error ?? 'unknown_error'));
-      }
+      entry.resolve(payload.region ?? null);
     } catch {
       // Ignore malformed messages.
     }
@@ -486,15 +321,10 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
     <WebView
       ref={webViewRef}
       originWhitelist={['*']}
-      // FACE_MODEL_DIR is built from FileSystem.cacheDirectory, which is
-      // already a full "file://..." URI (not a bare path) - prepending
-      // another "file://" here used to produce a doubled, broken URI
-      // (file://file:///...), which silently failed to resolve tf.min.js
-      // and blazeface.min.js against it.
       source={
         FACE_DETECTION_ENABLED
-          ? { html: ANALYZE_HTML, baseUrl: FACE_MODEL_DIR }
-          : { html: ANALYZE_HTML }
+          ? { html: DETECT_HTML, baseUrl: FACE_MODEL_DIR }
+          : { html: DETECT_HTML }
       }
       allowFileAccess
       allowFileAccessFromFileURLs
@@ -503,14 +333,7 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
         readyRef.current = true;
         flushQueue();
       }}
-      onError={(e) => {
-        diagnosis.current = `échec de chargement : ${e.nativeEvent.description}`;
-      }}
-      onHttpError={(e) => {
-        diagnosis.current = `erreur HTTP ${e.nativeEvent.statusCode}`;
-      }}
-      onRenderProcessGone={(e) => {
-        diagnosis.current = `page fermée par le téléphone (didCrash: ${e.nativeEvent.didCrash})`;
+      onRenderProcessGone={() => {
         readyRef.current = false;
       }}
       onMessage={handleMessage}
@@ -523,8 +346,8 @@ const HashWorker = forwardRef<HashWorkerHandle>((_props, ref) => {
 HashWorker.displayName = 'HashWorker';
 
 const styles = StyleSheet.create({
-  // The worker has no visible UI - it's a headless canvas used purely for
-  // native-quality image decoding, which isn't otherwise available in JS.
+  // The worker has no visible UI - it's a headless page used purely for
+  // face detection, which isn't otherwise available without native code.
   hidden: {
     position: 'absolute',
     width: 1,
