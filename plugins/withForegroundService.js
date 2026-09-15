@@ -4,7 +4,10 @@
 // long-running photo scan needs to keep going while the user switches to
 // another app. This adds exactly that to the manifest during prebuild/EAS
 // build.
-const { withAndroidManifest, AndroidConfig } = require('@expo/config-plugins');
+// Imported from the `expo` package itself (not the standalone
+// `@expo/config-plugins` package, which SDK 57's dependency tree no longer
+// hoists/exposes directly) - this is the path Expo itself now documents.
+const { withAndroidManifest, AndroidConfig } = require('expo/config-plugins');
 
 function addPermission(androidManifest, name) {
   androidManifest.manifest['uses-permission'] = androidManifest.manifest['uses-permission'] || [];
