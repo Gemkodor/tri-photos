@@ -578,6 +578,15 @@ export default function App() {
   }
 
   /**
+   * Replaces the whole secondary-action selection at once - used by
+   * "moments"'s quick move/copy on photos already checked there, instead of
+   * making her re-pick them one by one on the dedicated selection screen.
+   */
+  function seedSecondaryAction(uris: string[]) {
+    setSecondaryActionUris(new Set(uris));
+  }
+
+  /**
    * Moves every photo currently marked in `secondaryActionUris` (either
    * flavor below), after confirming - unlike copying, this really does
    * remove them from where they currently are, so it needs the same "are
@@ -1122,6 +1131,7 @@ export default function App() {
             onMoveToExistingFolder={handleMoveToExistingFolder}
             onCopySelectedToNewFolder={handleCopySelectedToNewFolder}
             onCopySelectedToExistingFolder={handleCopySelectedToExistingFolder}
+            onSeedSecondaryAction={seedSecondaryAction}
           />
         )}
 

@@ -95,6 +95,8 @@ type Props = {
   onMoveToExistingFolder: () => void;
   onCopySelectedToNewFolder: (name: string) => void;
   onCopySelectedToExistingFolder: () => void;
+  /** Replaces the whole secondary-action selection at once - for "moments"'s quick move/copy from photos already checked there. */
+  onSeedSecondaryAction: (uris: string[]) => void;
 };
 
 type FlatViewer = { photos: HashedPhoto[]; index: number; title: string };
@@ -141,6 +143,7 @@ export default function ResultsScreen({
   onMoveToExistingFolder,
   onCopySelectedToNewFolder,
   onCopySelectedToExistingFolder,
+  onSeedSecondaryAction,
 }: Props) {
   const [viewerGroupIndex, setViewerGroupIndex] = useState<number | null>(null);
   const [viewerPhotoIndex, setViewerPhotoIndex] = useState(0);
@@ -150,10 +153,15 @@ export default function ResultsScreen({
   const [showOnlyAlbum, setShowOnlyAlbum] = useState(false);
   const [albumFolderModalOpen, setAlbumFolderModalOpen] = useState(false);
   // Secondary "déplacer"/"copier vers un dossier" actions, available from
-  // any step - their own little screen (see secondaryMode below), reached
-  // via the "⋯" menu. null means neither is active.
+  // any step - reached either via the "⋯" menu's own dedicated selection
+  // screen (showSecondaryScreen), or, from "moments", straight from photos
+  // already checked there (see the move-picker modal below) - Flavie found
+  // having to re-pick photos on a separate screen painful when she'd just
+  // spotted misplaced ones while already looking at a moment. secondaryMode
+  // alone (not showSecondaryScreen) decides the wording/handlers either way.
   const [secondaryMenuOpen, setSecondaryMenuOpen] = useState(false);
   const [secondaryMode, setSecondaryMode] = useState<'move' | 'copy' | null>(null);
+  const [showSecondaryScreen, setShowSecondaryScreen] = useState(false);
   const [secondaryFolderModalOpen, setSecondaryFolderModalOpen] = useState(false);
   // "moments" hand-editing: photos picked to move together, and whether
   // the "choose a group" picker is currently open for them.
@@ -468,7 +476,7 @@ export default function ResultsScreen({
                 </Text>
               </Pressable>
             )}
-            {!secondaryMode && (
+            {!showSecondaryScreen && (
               <Pressable onPress={() => setSecondaryMenuOpen(true)} hitSlop={12} style={styles.moreButton}>
                 <Text style={styles.moreButtonText}>⋯</Text>
               </Pressable>
@@ -534,7 +542,7 @@ export default function ResultsScreen({
         )}
       </View>
 
-      {secondaryMode && (
+      {showSecondaryScreen && (
         <>
           {allPhotos.length === 0 ? (
             <View style={styles.empty}>
@@ -549,7 +557,13 @@ export default function ResultsScreen({
                 Touche la loupe pour voir en grand.
               </Text>
               <View style={styles.bulkActionsRow}>
-                <Pressable style={styles.selectAllButton} onPress={() => setSecondaryMode(null)}>
+                <Pressable
+                  style={styles.selectAllButton}
+                  onPress={() => {
+                    setShowSecondaryScreen(false);
+                    setSecondaryMode(null);
+                  }}
+                >
                   <Text style={styles.selectAllButtonText}>✕ Annuler</Text>
                 </Pressable>
               </View>
@@ -644,7 +658,7 @@ export default function ResultsScreen({
         </>
       )}
 
-      {!secondaryMode && (
+      {!showSecondaryScreen && (
         <>
       {mode === 'similar' && (
         <View style={styles.similaritySection}>
@@ -1822,6 +1836,42 @@ export default function ResultsScreen({
                     Nouveau groupe séparé
                   </Text>
                 </Pressable>
+                <Pressable
+                  style={styles.movePickerTile}
+                  onPress={() => {
+                    const uris = Array.from(moveSelection);
+                    setMoveSelection(new Set());
+                    setMovePickerOpen(false);
+                    onSeedSecondaryAction(uris);
+                    setSecondaryMode('move');
+                    setSecondaryFolderModalOpen(true);
+                  }}
+                >
+                  <View style={styles.movePickerNewTile}>
+                    <Text style={styles.movePickerNewTileText}>📦</Text>
+                  </View>
+                  <Text style={styles.movePickerTileLabel} numberOfLines={2}>
+                    Déplacer vers un dossier
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={styles.movePickerTile}
+                  onPress={() => {
+                    const uris = Array.from(moveSelection);
+                    setMoveSelection(new Set());
+                    setMovePickerOpen(false);
+                    onSeedSecondaryAction(uris);
+                    setSecondaryMode('copy');
+                    setSecondaryFolderModalOpen(true);
+                  }}
+                >
+                  <View style={styles.movePickerNewTile}>
+                    <Text style={styles.movePickerNewTileText}>📄</Text>
+                  </View>
+                  <Text style={styles.movePickerTileLabel} numberOfLines={2}>
+                    Copier vers un dossier
+                  </Text>
+                </Pressable>
                 {groups.map((g, i) => {
                   const first = g.photos[0];
                   const label = first?.capturedAt
@@ -1909,6 +1959,7 @@ export default function ResultsScreen({
               onPress={() => {
                 setSecondaryMenuOpen(false);
                 setSecondaryMode('move');
+                setShowSecondaryScreen(true);
               }}
             >
               <Text style={styles.secondaryMenuItemText}>
@@ -1923,6 +1974,7 @@ export default function ResultsScreen({
               onPress={() => {
                 setSecondaryMenuOpen(false);
                 setSecondaryMode('copy');
+                setShowSecondaryScreen(true);
               }}
             >
               <Text style={styles.secondaryMenuItemText}>📄 Copier des photos vers un dossier</Text>
