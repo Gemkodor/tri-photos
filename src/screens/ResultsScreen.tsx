@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -322,6 +323,24 @@ export default function ResultsScreen({
 
   const viewerGroup = viewerGroupIndex !== null ? (visibleGroups[viewerGroupIndex] ?? null) : null;
   const nextMode = nextSortMode(mode);
+
+  // "moments" on a big folder (Flavie: 800+ photos, 100+ moments) was
+  // unusable to scroll - a plain ScrollView + .map() mounts every single
+  // group's photos at once, hundreds of Image views deep, right away. A
+  // FlatList (see the "moments" render branch) only ever mounts the groups
+  // near the visible area, so this precomputes each group's already-visible
+  // photos once per data change instead of redoing that filter on every
+  // scroll-driven re-render.
+  const momentsRenderData = useMemo(() => {
+    if (mode !== 'moments') return [];
+    return visibleGroups
+      .map((group, groupIndex) => ({
+        group,
+        groupIndex,
+        visiblePhotos: showKeptPhotos ? group.photos : group.photos.filter((p) => !keptUris.has(p.uri)),
+      }))
+      .filter((entry) => entry.visiblePhotos.length > 0);
+  }, [mode, visibleGroups, showKeptPhotos, keptUris]);
 
   function goToGroup(index: number) {
     if (index < 0 || index >= visibleGroups.length) return;
@@ -1068,43 +1087,54 @@ export default function ResultsScreen({
             )}
           </View>
         ) : (
-          <ScrollView contentContainerStyle={styles.list}>
-            <Text style={styles.instructions}>
-              Les photos sont regroupées par moment (quand elles ont été prises), pas par
-              ressemblance - même les photos seules ont leur groupe. Pour chaque photo : ❤️ à
-              garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle - une photo gardée disparaît du
-              groupe, comme un groupe marqué vu. Coche une ou plusieurs photos (le rond en haut à
-              gauche) pour les déplacer ensemble vers un autre moment.
-            </Text>
-            <View style={styles.bulkActionsRow}>
-              {momentsKeptCount > 0 && (
-                <Pressable
-                  style={styles.selectAllButton}
-                  onPress={() => setShowKeptPhotos((v) => !v)}
-                >
-                  <Text style={styles.selectAllButtonText}>
-                    {momentsKeptCount} gardée{momentsKeptCount > 1 ? 's' : ''} ·{' '}
-                    {showKeptPhotos ? 'masquer' : 'afficher'}
-                  </Text>
-                </Pressable>
-              )}
-              {nextMode && (
-                <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
-                  <Text style={styles.selectAllButtonText}>
-                    ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-            {visibleGroups.map((group, groupIndex) => {
-              const visiblePhotos = showKeptPhotos
-                ? group.photos
-                : group.photos.filter((p) => !keptUris.has(p.uri));
-              if (visiblePhotos.length === 0) return null;
+          <FlatList
+            data={momentsRenderData}
+            keyExtractor={(entry) => entry.group.id}
+            contentContainerStyle={styles.list}
+            // Big folders (Flavie: 800+ photos, 100+ moments) made scrolling
+            // unusable with every group mounted at once - only render what's
+            // near the visible area, and a bit less eagerly than the default
+            // since each group is itself a whole row of photos.
+            initialNumToRender={6}
+            maxToRenderPerBatch={4}
+            windowSize={5}
+            ListHeaderComponent={
+              <>
+                <Text style={styles.instructions}>
+                  Les photos sont regroupées par moment (quand elles ont été prises), pas par
+                  ressemblance - même les photos seules ont leur groupe. Pour chaque photo : ❤️ à
+                  garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle - une photo gardée disparaît du
+                  groupe, comme un groupe marqué vu. Coche une ou plusieurs photos (le rond en haut à
+                  gauche) pour les déplacer ensemble vers un autre moment.
+                </Text>
+                <View style={styles.bulkActionsRow}>
+                  {momentsKeptCount > 0 && (
+                    <Pressable
+                      style={styles.selectAllButton}
+                      onPress={() => setShowKeptPhotos((v) => !v)}
+                    >
+                      <Text style={styles.selectAllButtonText}>
+                        {momentsKeptCount} gardée{momentsKeptCount > 1 ? 's' : ''} ·{' '}
+                        {showKeptPhotos ? 'masquer' : 'afficher'}
+                      </Text>
+                    </Pressable>
+                  )}
+                  {nextMode && (
+                    <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
+                      <Text style={styles.selectAllButtonText}>
+                        ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              </>
+            }
+            renderItem={({ item }) => {
+              const { group, groupIndex, visiblePhotos } = item;
               const allChecked = visiblePhotos.every((p) => moveSelection.has(p.uri));
               const isReviewed = reviewedGroupKeys.has(groupKey(group));
               return (
-                <View key={group.id} style={[styles.groupCard, isReviewed && styles.groupCardReviewed]}>
+                <View style={[styles.groupCard, isReviewed && styles.groupCardReviewed]}>
                   <View style={styles.groupHeaderRow}>
                     <Text style={styles.groupLabel}>
                       Moment {groupIndex + 1} · {group.photos.length} photo
@@ -1256,8 +1286,8 @@ export default function ResultsScreen({
                   </ScrollView>
                 </View>
               );
-            })}
-          </ScrollView>
+            }}
+          />
         )
       ) : mode === 'album' || mode === 'quality' ? (
         allPhotos.length === 0 ? (
