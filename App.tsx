@@ -5,7 +5,12 @@ import { Alert, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import HashWorker, { HashWorkerHandle } from './src/components/HashWorker';
 import { copyPhotosToFolder, copyPhotosToNewFolder } from './src/lib/albumExport';
-import { getSavedAnalysis, saveAnalysis } from './src/lib/analysisStorage';
+import {
+  getSavedAnalysis,
+  getSavedFavorites,
+  saveAnalysis,
+  saveFavorites,
+} from './src/lib/analysisStorage';
 import {
   startScanningService,
   stopScanningService,
@@ -14,11 +19,13 @@ import {
 import {
   groupByMoments,
   groupDuplicates,
+  clusterBySimilarity,
   groupKey,
   MOMENT_GAP_MS,
-  SAME_SESSION_MAX_GAP_MS,
-  SORT_STEP_ORDER,
+  percentToThreshold,
   SORT_STEPS,
+  sortBySimilarity,
+  splitBySimilarity,
   type DuplicateGroup,
   type SortMode,
 } from './src/lib/duplicateGroups';
@@ -45,6 +52,13 @@ import TrashScreen from './src/screens/TrashScreen';
 import { colors } from './src/theme';
 
 type Screen = 'home' | 'scanning' | 'results' | 'trash' | 'subfolders';
+
+/** Steps still offered from the home screen: duplicates, and the moments flow (moments -> later -> final -> album). */
+const REACHABLE_MODES: SortMode[] = ['duplicates', 'moments', 'momentsLater', 'momentsFinal', 'album'];
+
+function isMomentsPart(mode: SortMode): boolean {
+  return mode === 'moments' || mode === 'momentsLater' || mode === 'momentsFinal' || mode === 'album';
+}
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('home');
@@ -106,6 +120,9 @@ export default function App() {
   // own set, independent of `selected` (poubelle) and `laterUris`, since
   // being in an album has nothing to do with either of those.
   const [albumUris, setAlbumUris] = useState<Set<string>>(new Set());
+  // ♥ favorites: marking one also puts it in `albumUris` (so it's already
+  // ticked when the album step opens), see toggleFavorite.
+  const [favoriteUris, setFavoriteUris] = useState<Set<string>>(new Set());
   const [albumExporting, setAlbumExporting] = useState(false);
   const [albumExportProgress, setAlbumExportProgress] = useState<{
     current: number;
@@ -126,25 +143,23 @@ export default function App() {
   const hashWorkerRef = useRef<HashWorkerHandle>(null);
 
   const groups = useMemo(() => {
-    if (mode === 'moments' || mode === 'momentsLater' || mode === 'momentsFinal') return momentGroups;
-    return groupDuplicates(
-      hashedPhotos,
-      similarityThreshold,
-      // Every sorting-part step (similar/blurry/decide/later/final) shares
-      // the one grouping "similar" produced, so the gate has to apply the
-      // same way regardless of which of those is currently showing -
-      // otherwise the very same two photos could count as grouped on one
-      // step and not on another. Never applied to "duplicates" (a
-      // separate part/threshold): a genuine exact copy's file name can
-      // carry a copy/save time completely unrelated to the original shot.
-      mode !== 'duplicates' ? SAME_SESSION_MAX_GAP_MS : undefined
-    );
+    // Every step of the moments flow (incl. the album) reads the hand-edited
+    // moment groups - not worth recomputing a similarity grouping there.
+    if (isMomentsPart(mode)) return momentGroups;
+    // "duplicates": no time gate - a genuine copy's file name can carry a
+    // copy/save time completely unrelated to the original shot.
+    return groupDuplicates(hashedPhotos, similarityThreshold);
   }, [hashedPhotos, similarityThreshold, mode, momentGroups]);
 
   const trashReminder = useMemo(() => getTrashReminder(trashEntries), [trashEntries]);
 
   useEffect(() => {
     getLastFolderUri().then(setLastFolderUriState);
+    getSavedFavorites().then((uris) => {
+      setFavoriteUris(new Set(uris));
+      // Already ticked for the album when it opens, same as right after marking them.
+      setAlbumUris(new Set(uris));
+    });
     refreshTrash();
     getSavedAnalysis().then((saved) => {
       if (saved && saved.hashedPhotos.length > 0) {
@@ -154,7 +169,10 @@ export default function App() {
         // A save from an older version of the app could carry a step that
         // no longer exists (the sorting path has changed over time) - fall
         // back rather than restoring into a step the app can't render.
-        const restoredMode = saved.mode && SORT_STEP_ORDER.includes(saved.mode) ? saved.mode : 'duplicates';
+        // Only the steps still reachable from the home screen (the older
+        // "sorting" and "quality" parts aren't offered anymore).
+        const restoredMode =
+          saved.mode && REACHABLE_MODES.includes(saved.mode) ? saved.mode : 'duplicates';
         setMode(restoredMode);
         setHasSharpness(restoredMode !== 'duplicates');
         // A save from before momentGroups was persisted (or the mode wasn't
@@ -162,12 +180,23 @@ export default function App() {
         // showing an empty "moments" step for no reason.
         setMomentGroups(
           saved.momentGroups ??
-            (restoredMode === 'moments' ? groupByMoments(saved.hashedPhotos, MOMENT_GAP_MS) : [])
+            (isMomentsPart(restoredMode) ? groupByMoments(saved.hashedPhotos, MOMENT_GAP_MS) : [])
         );
         setScreen('results');
       }
     });
   }, []);
+
+  // Skips the very first run (empty set, before favorites finish loading),
+  // which would otherwise overwrite what was saved.
+  const favoritesLoaded = useRef(false);
+  useEffect(() => {
+    if (!favoritesLoaded.current) {
+      favoritesLoaded.current = true;
+      return;
+    }
+    saveFavorites(Array.from(favoriteUris));
+  }, [favoriteUris]);
 
   async function refreshTrash() {
     setTrashEntries(await getTrashEntries());
@@ -256,6 +285,7 @@ export default function App() {
       setSelected(new Set());
       setLaterUris(new Set());
       setKeptUris(new Set());
+      setFavoriteUris(new Set());
       setAlbumUris(new Set());
       setSecondaryActionUris(new Set());
       setReviewedGroupKeys(new Set());
@@ -522,6 +552,13 @@ export default function App() {
       // selection makes it easy to pick a fresh batch right away instead
       // of having to untick everything that was just copied.
       setAlbumUris(new Set());
+      // Copied favorites have done their job - no longer ♥ (and so not
+      // ticked again next time the album opens).
+      setFavoriteUris((prev) => {
+        const next = new Set(prev);
+        toExport.forEach((p) => next.delete(p.uri));
+        return next;
+      });
       if (failedCount === 0) {
         Alert.alert(
           'Album créé',
@@ -743,8 +780,12 @@ export default function App() {
     );
   }
 
-  /** The "decide" step's three-way mark: keep (the default, clears both), later, or trash. */
-  function setPhotoStatus(uri: string, status: 'keep' | 'later' | 'trash') {
+  /**
+   * The three-way mark: keep, later, or trash - or 'undecided', which clears
+   * all three (tapping the already-active button again used to leave no way
+   * back to "not decided yet").
+   */
+  function setPhotoStatus(uri: string, status: 'keep' | 'later' | 'trash' | 'undecided') {
     setSelected((prev) => {
       const has = prev.has(uri);
       const shouldHave = status === 'trash';
@@ -852,6 +893,106 @@ export default function App() {
         momentGroups: next,
       });
     }
+  }
+
+  function commitMomentGroups(next: DuplicateGroup[]) {
+    setMomentGroups(next);
+    if (lastFolderUri) {
+      saveAnalysis({
+        folderUri: lastFolderUri,
+        similarityThreshold,
+        hashedPhotos,
+        reviewedGroupKeys: Array.from(reviewedGroupKeys),
+        mode,
+        momentGroups: next,
+      });
+    }
+  }
+
+  /** Puts `photoUri` right before `beforeUri` within its moment (or at the very end with null) - a far move in one step instead of nudging one spot at a time. */
+  function reorderMomentPhoto(groupId: string, photoUri: string, beforeUri: string | null) {
+    const groupIndex = momentGroups.findIndex((g) => g.id === groupId);
+    if (groupIndex === -1) return;
+    const group = momentGroups[groupIndex];
+    const moving = group.photos.find((p) => p.uri === photoUri);
+    if (!moving) return;
+    const rest = group.photos.filter((p) => p.uri !== photoUri);
+    let insertAt = beforeUri === null ? rest.length : rest.findIndex((p) => p.uri === beforeUri);
+    if (insertAt < 0) insertAt = rest.length;
+    const photos = [...rest.slice(0, insertAt), moving, ...rest.slice(insertAt)];
+    commitMomentGroups(momentGroups.map((g, i) => (i === groupIndex ? { ...g, photos } : g)));
+  }
+
+  /** Puts a moment right after `afterGroupId` (or at the very start / end) - no more climbing one spot at a time. */
+  function moveMomentGroupTo(groupId: string, afterGroupId: string | 'start' | 'end') {
+    const moving = momentGroups.find((g) => g.id === groupId);
+    if (!moving) return;
+    const rest = momentGroups.filter((g) => g.id !== groupId);
+    let insertAt: number;
+    if (afterGroupId === 'start') insertAt = 0;
+    else if (afterGroupId === 'end') insertAt = rest.length;
+    else {
+      const anchor = rest.findIndex((g) => g.id === afterGroupId);
+      if (anchor === -1) return;
+      insertAt = anchor + 1;
+    }
+    commitMomentGroups([...rest.slice(0, insertAt), moving, ...rest.slice(insertAt)]);
+  }
+
+  /**
+   * Puts similar photos side by side inside one moment (or every moment):
+   * 'sort' keeps each moment whole but reorders it, 'split' cuts it into one
+   * moment per set of similar photos. Uses the hashes every photo already
+   * has, so it's instant - no new analysis of the pictures.
+   */
+  function regroupMomentsBySimilarity(scope: string | 'all', percent: number, how: 'sort' | 'split') {
+    const threshold = percentToThreshold(percent);
+    const affected = momentGroups.filter((g) => scope === 'all' || g.id === scope);
+    const similarSets = affected.reduce(
+      (n, g) => n + clusterBySimilarity(g.photos, threshold).filter((c) => c.length >= 2).length,
+      0
+    );
+    if (similarSets === 0) {
+      Alert.alert(
+        'Rien à regrouper',
+        'Aucune photo ne se ressemble assez à ce niveau. Baisse le curseur pour être moins exigeante.'
+      );
+      return;
+    }
+    const next: DuplicateGroup[] = [];
+    let counter = 0;
+    for (const g of momentGroups) {
+      if (scope !== 'all' && g.id !== scope) {
+        next.push(g);
+      } else if (how === 'sort') {
+        next.push({ ...g, photos: sortBySimilarity(g.photos, threshold) });
+      } else {
+        splitBySimilarity(g.photos, threshold).forEach((photos, i) => {
+          next.push({
+            id: i === 0 ? g.id : `moment-split-${Date.now()}-${counter++}`,
+            photos,
+          });
+        });
+      }
+    }
+    commitMomentGroups(next);
+  }
+
+  /** ♥ favorite: also ticks (or unticks) it for the album, so it's already selected there. */
+  function toggleFavorite(uri: string) {
+    const willBeFavorite = !favoriteUris.has(uri);
+    setFavoriteUris((prev) => {
+      const next = new Set(prev);
+      if (willBeFavorite) next.add(uri);
+      else next.delete(uri);
+      return next;
+    });
+    setAlbumUris((prev) => {
+      const next = new Set(prev);
+      if (willBeFavorite) next.add(uri);
+      else next.delete(uri);
+      return next;
+    });
   }
 
   /**
@@ -1116,6 +1257,11 @@ export default function App() {
             faceModelDiagnostic={faceModelDiagnostic}
             onMoveMomentPhotos={moveMomentPhotos}
             onMoveMomentGroup={moveMomentGroup}
+            onReorderMomentPhoto={reorderMomentPhoto}
+            onMoveMomentGroupTo={moveMomentGroupTo}
+            onRegroupBySimilarity={regroupMomentsBySimilarity}
+            favoriteUris={favoriteUris}
+            onToggleFavorite={toggleFavorite}
             momentGroups={momentGroups}
             albumUris={albumUris}
             onToggleAlbum={toggleAlbum}

@@ -20,6 +20,7 @@ import {
   groupHasLargeSizeDifference,
   groupIsSameFolder,
   groupKey,
+  isLowQualitySize,
   isBlurryPhoto,
   nextSortMode,
   partSteps,
@@ -43,7 +44,7 @@ type Props = {
   laterUris: Set<string>;
   /** Photos explicitly marked ❤️ "garder" - deliberately separate from "untouched", see status() below. */
   keptUris: Set<string>;
-  onSetPhotoStatus: (uri: string, status: 'keep' | 'later' | 'trash') => void;
+  onSetPhotoStatus: (uri: string, status: 'keep' | 'later' | 'trash' | 'undecided') => void;
   deleting: boolean;
   similarityThreshold: number;
   trashCount: number;
@@ -66,6 +67,15 @@ type Props = {
   onMoveMomentPhotos: (photoUris: string[], targetGroupId: string | 'new') => void;
   /** "moments" only: nudges a group up or down in the list. */
   onMoveMomentGroup: (groupId: string, direction: 'up' | 'down') => void;
+  /** "moments": puts a photo right before another one in its moment (null = at the end). */
+  onReorderMomentPhoto: (groupId: string, photoUri: string, beforeUri: string | null) => void;
+  /** "moments": puts a moment right after another (or at the start / end) in one step. */
+  onMoveMomentGroupTo: (groupId: string, afterGroupId: string | 'start' | 'end') => void;
+  /** "moments": puts similar photos side by side in one moment (or 'all'), sorted or split into several moments. */
+  onRegroupBySimilarity: (scope: string | 'all', percent: number, how: 'sort' | 'split') => void;
+  /** ♥ favorites, also pre-selected for the album. */
+  favoriteUris: Set<string>;
+  onToggleFavorite: (uri: string) => void;
   /**
    * "album" only: the moments grouping (if any was ever computed this
    * session), used purely to order the album grid the same way - so a
@@ -99,6 +109,39 @@ type Props = {
   onSeedSecondaryAction: (uris: string[]) => void;
 };
 
+/** Last folder of a path like "Pictures/Vacances/Plage" -> "Plage", short enough to show under a thumbnail. */
+function shortFolderName(folderPath: string): string {
+  const parts = folderPath.split('/').filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : '(dossier racine)';
+}
+
+function GroupPill({
+  label,
+  onPress,
+  disabled,
+  active,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  active?: boolean;
+}) {
+  return (
+    <Pressable
+      hitSlop={4}
+      disabled={disabled}
+      onPress={onPress}
+      style={[
+        styles.groupPill,
+        active && styles.groupPillActive,
+        disabled && styles.groupPillDisabled,
+      ]}
+    >
+      <Text style={[styles.groupPillText, active && styles.groupPillTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 type FlatViewer = { photos: HashedPhoto[]; index: number; title: string };
 
 export default function ResultsScreen({
@@ -128,6 +171,11 @@ export default function ResultsScreen({
   faceModelDiagnostic,
   onMoveMomentPhotos,
   onMoveMomentGroup,
+  onReorderMomentPhoto,
+  onMoveMomentGroupTo,
+  onRegroupBySimilarity,
+  favoriteUris,
+  onToggleFavorite,
   momentGroups,
   albumUris,
   onToggleAlbum,
@@ -167,6 +215,25 @@ export default function ResultsScreen({
   // the "choose a group" picker is currently open for them.
   const [moveSelection, setMoveSelection] = useState<Set<string>>(new Set());
   const [movePickerOpen, setMovePickerOpen] = useState(false);
+  // "moments": quick reorder of one moment's photos (tap the photo to move,
+  // then the one it should go in front of), the "place this moment..."
+  // picker, and the similarity-grouping dialog (one moment, or 'all').
+  const [reorderGroupId, setReorderGroupId] = useState<string | null>(null);
+  const [reorderPickedUri, setReorderPickedUri] = useState<string | null>(null);
+  const [placeGroupId, setPlaceGroupId] = useState<string | null>(null);
+  const [similarityScope, setSimilarityScope] = useState<string | null>(null);
+  const [similarityPercent, setSimilarityPercent] = useState(65);
+
+  function handleReorderTap(groupId: string, uri: string) {
+    if (!reorderPickedUri) {
+      setReorderPickedUri(uri);
+    } else if (reorderPickedUri === uri) {
+      setReorderPickedUri(null);
+    } else {
+      onReorderMomentPhoto(groupId, reorderPickedUri, uri);
+      setReorderPickedUri(null);
+    }
+  }
 
   function toggleMoveSelection(uri: string) {
     setMoveSelection((prev) => {
@@ -457,7 +524,7 @@ export default function ResultsScreen({
         : `${allPhotos.length} photo${allPhotos.length > 1 ? 's' : ''}${albumUris.size > 0 ? ` · ${albumUris.size} sélectionnée${albumUris.size > 1 ? 's' : ''}` : ''}`;
     }
     if (groups.length === 0) return 'Aucun doublon trouvé';
-    const noun = mode === 'duplicates' ? 'identiques' : 'semblables';
+    const noun = 'semblables';
     return `${groups.length} groupe${groups.length > 1 ? 's' : ''} de photos ${noun}`;
   })();
 
@@ -660,7 +727,7 @@ export default function ResultsScreen({
 
       {!showSecondaryScreen && (
         <>
-      {mode === 'similar' && (
+      {(mode === 'similar' || mode === 'duplicates') && (
         <View style={styles.similaritySection}>
           <View style={styles.similarityLabelRow}>
             <Text style={styles.similarityLabel}>Niveau de ressemblance</Text>
@@ -680,20 +747,6 @@ export default function ResultsScreen({
           <View style={styles.similarityRow}>
             <Text style={styles.similarityEdgeLabel}>Large</Text>
             <Text style={styles.similarityEdgeLabel}>Identique</Text>
-          </View>
-          <Text style={styles.similarityDescription}>
-            {similarityDescription(similarityThreshold)}
-          </Text>
-        </View>
-      )}
-
-      {mode === 'duplicates' && (
-        <View style={styles.similaritySection}>
-          <View style={styles.similarityLabelRow}>
-            <Text style={styles.similarityLabel}>Niveau de ressemblance</Text>
-            <Text style={styles.similarityPercent}>
-              {thresholdToPercent(similarityThreshold)}%
-            </Text>
           </View>
           <Text style={styles.similarityDescription}>
             {similarityDescription(similarityThreshold)}
@@ -764,6 +817,22 @@ export default function ResultsScreen({
                           <Text style={styles.blurBadgeText}>🌫 flou</Text>
                         </View>
                       )
+                    )}
+                    {mode === 'momentsFinal' && (
+                      <Pressable
+                        style={styles.favHeart}
+                        hitSlop={6}
+                        onPress={() => onToggleFavorite(photo.uri)}
+                      >
+                        <Text
+                          style={[
+                            styles.favHeartText,
+                            favoriteUris.has(photo.uri) && styles.favHeartTextOn,
+                          ]}
+                        >
+                          {favoriteUris.has(photo.uri) ? '♥' : '♡'}
+                        </Text>
+                      </Pressable>
                     )}
                     <Pressable
                       style={styles.magnifyBadge}
@@ -1004,8 +1073,8 @@ export default function ResultsScreen({
         ) : (
           <ScrollView contentContainerStyle={styles.list}>
             <Text style={styles.instructions}>
-              Les photos que tu as mises de côté pour plus tard. Choisis maintenant : ❤️ à garder ou
-              🗑 à la poubelle.
+              Les photos que tu as mises de côté pour plus tard. Choisis maintenant : ✅ à garder ou
+              🗑 à la poubelle (♡ pour la mettre en favori).
             </Text>
             {nextMode && (
               <View style={styles.bulkActionsRow}>
@@ -1045,6 +1114,20 @@ export default function ResultsScreen({
                       )
                     )}
                     <Pressable
+                      style={styles.favHeart}
+                      hitSlop={6}
+                      onPress={() => onToggleFavorite(photo.uri)}
+                    >
+                      <Text
+                        style={[
+                          styles.favHeartText,
+                          favoriteUris.has(photo.uri) && styles.favHeartTextOn,
+                        ]}
+                      >
+                        {favoriteUris.has(photo.uri) ? '♥' : '♡'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
                       style={styles.magnifyBadge}
                       hitSlop={8}
                       onPress={() => openFlatViewer(laterPhotos, index, 'À revoir plus tard')}
@@ -1057,12 +1140,14 @@ export default function ResultsScreen({
                         hitSlop={4}
                         onPress={() => onSetPhotoStatus(photo.uri, 'keep')}
                       >
-                        <Text style={styles.statusButtonText}>❤️</Text>
+                        <Text style={styles.statusButtonText}>✅</Text>
                       </Pressable>
                       <Pressable
                         style={[styles.statusButton, isSelected && styles.statusButtonActiveTrash]}
                         hitSlop={4}
-                        onPress={() => onSetPhotoStatus(photo.uri, 'trash')}
+                        // Back to "plus tard" (not "undecided", which would
+                        // drop it out of this very list) when un-trashing.
+                        onPress={() => onSetPhotoStatus(photo.uri, isSelected ? 'later' : 'trash')}
                       >
                         <Text style={styles.statusButtonText}>🗑</Text>
                       </Pressable>
@@ -1112,16 +1197,37 @@ export default function ResultsScreen({
             initialNumToRender={6}
             maxToRenderPerBatch={4}
             windowSize={5}
+            extraData={[
+              selected,
+              laterUris,
+              keptUris,
+              favoriteUris,
+              moveSelection,
+              reviewedGroupKeys,
+              reorderGroupId,
+              reorderPickedUri,
+              showKeptPhotos,
+            ]}
             ListHeaderComponent={
               <>
                 <Text style={styles.instructions}>
-                  Les photos sont regroupées par moment (quand elles ont été prises), pas par
-                  ressemblance - même les photos seules ont leur groupe. Pour chaque photo : ❤️ à
-                  garder, 🕐 à revoir plus tard, ou 🗑 à la poubelle - une photo gardée disparaît du
-                  groupe, comme un groupe marqué vu. Coche une ou plusieurs photos (le rond en haut à
-                  gauche) pour les déplacer ensemble vers un autre moment.
+                  Les photos sont regroupées par moment (quand elles ont été prises), celles sans
+                  date en premier. Pour chaque photo : ✅ garder, 🕐 plus tard ou 🗑 jeter (retouche
+                  le bouton pour annuler), et ♡ pour la mettre en favori (elle sera déjà cochée pour
+                  l'album). « ≋ Ressemblance » range côte à côte les photos qui se ressemblent, « ⇅
+                  Ordre » change l'ordre des photos d'un moment, « 📍 Placer » déplace un moment
+                  d'un coup. Coche des photos (le rond en haut à gauche) pour les déplacer vers un
+                  autre moment ou un autre dossier.
                 </Text>
                 <View style={styles.bulkActionsRow}>
+                  <Pressable
+                    style={styles.selectAllButton}
+                    onPress={() => setSimilarityScope('all')}
+                  >
+                    <Text style={styles.selectAllButtonText}>
+                      ≋ Rapprocher les similaires (tous les moments)
+                    </Text>
+                  </Pressable>
                   {momentsKeptCount > 0 && (
                     <Pressable
                       style={styles.selectAllButton}
@@ -1147,121 +1253,154 @@ export default function ResultsScreen({
               const { group, groupIndex, visiblePhotos } = item;
               const allChecked = visiblePhotos.every((p) => moveSelection.has(p.uri));
               const isReviewed = reviewedGroupKeys.has(groupKey(group));
+              const inReorder = reorderGroupId === group.id;
               return (
                 <View style={[styles.groupCard, isReviewed && styles.groupCardReviewed]}>
-                  <View style={styles.groupHeaderRow}>
-                    <Text style={styles.groupLabel}>
-                      Moment {groupIndex + 1} · {group.photos.length} photo
-                      {group.photos.length > 1 ? 's' : ''}
-                      {isReviewed ? ' · vu' : ''}
-                    </Text>
-                    <View style={styles.groupHeaderLinks}>
-                      <Pressable
-                        hitSlop={8}
-                        disabled={groupIndex === 0}
-                        onPress={() => onMoveMomentGroup(group.id, 'up')}
-                      >
-                        <Text
-                          style={[
-                            styles.reorderArrow,
-                            groupIndex === 0 && styles.reorderArrowDisabled,
-                          ]}
-                        >
-                          ▲
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        hitSlop={8}
-                        disabled={groupIndex === visibleGroups.length - 1}
-                        onPress={() => onMoveMomentGroup(group.id, 'down')}
-                      >
-                        <Text
-                          style={[
-                            styles.reorderArrow,
-                            groupIndex === visibleGroups.length - 1 && styles.reorderArrowDisabled,
-                          ]}
-                        >
-                          ▼
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        hitSlop={8}
-                        onPress={() =>
-                          setMoveSelection((prev) => {
-                            const next = new Set(prev);
-                            visiblePhotos.forEach((p) => {
-                              if (allChecked) next.delete(p.uri);
-                              else next.add(p.uri);
-                            });
-                            return next;
-                          })
-                        }
-                      >
-                        <Text style={styles.groupSelectLink}>
-                          {allChecked ? 'Tout désélectionner' : 'Tout sélectionner'}
-                        </Text>
-                      </Pressable>
-                      <Pressable hitSlop={8} onPress={() => onMarkGroupReviewed(groupKey(group))}>
-                        <Text style={styles.groupSelectLink}>
-                          {isReviewed ? '✓ Vu' : '✓ Marquer vu'}
-                        </Text>
-                      </Pressable>
-                    </View>
+                  <Text style={styles.groupLabel}>
+                    Moment {groupIndex + 1} · {group.photos.length} photo
+                    {group.photos.length > 1 ? 's' : ''}
+                    {isReviewed ? ' · vu' : ''}
+                  </Text>
+                  <View style={styles.groupActionsRow}>
+                    <GroupPill
+                      label="▲"
+                      disabled={groupIndex === 0}
+                      onPress={() => onMoveMomentGroup(group.id, 'up')}
+                    />
+                    <GroupPill
+                      label="▼"
+                      disabled={groupIndex === visibleGroups.length - 1}
+                      onPress={() => onMoveMomentGroup(group.id, 'down')}
+                    />
+                    <GroupPill
+                      label="⤒ Début"
+                      disabled={groupIndex === 0}
+                      onPress={() => onMoveMomentGroupTo(group.id, 'start')}
+                    />
+                    <GroupPill
+                      label="⤓ Fin"
+                      disabled={groupIndex === visibleGroups.length - 1}
+                      onPress={() => onMoveMomentGroupTo(group.id, 'end')}
+                    />
+                    <GroupPill label="📍 Placer…" onPress={() => setPlaceGroupId(group.id)} />
+                    <GroupPill
+                      label={allChecked ? '☑ Tout décocher' : '☐ Tout cocher'}
+                      onPress={() =>
+                        setMoveSelection((prev) => {
+                          const next = new Set(prev);
+                          visiblePhotos.forEach((p) => {
+                            if (allChecked) next.delete(p.uri);
+                            else next.add(p.uri);
+                          });
+                          return next;
+                        })
+                      }
+                    />
+                    <GroupPill label="≋ Ressemblance" onPress={() => setSimilarityScope(group.id)} />
+                    <GroupPill
+                      label="⇅ Ordre"
+                      active={inReorder}
+                      onPress={() => {
+                        setReorderPickedUri(null);
+                        setReorderGroupId(inReorder ? null : group.id);
+                      }}
+                    />
+                    <GroupPill
+                      label={isReviewed ? '✓ Vu' : '✓ Marquer vu'}
+                      onPress={() => onMarkGroupReviewed(groupKey(group))}
+                    />
                   </View>
+                  {inReorder && (
+                    <Text style={styles.reorderHint}>
+                      {reorderPickedUri
+                        ? 'Touche la photo devant laquelle la placer (ou « à la fin »). Retouche la même pour annuler.'
+                        : 'Touche la photo à déplacer.'}
+                    </Text>
+                  )}
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     {visiblePhotos.map((photo) => {
                       const photoIndex = group.photos.indexOf(photo);
                       const status = photoStatus(photo.uri);
                       const photoIsBlurry = isBlurry(photo);
                       const isChecked = moveSelection.has(photo.uri);
+                      const isFavorite = favoriteUris.has(photo.uri);
+                      const isPicked = inReorder && reorderPickedUri === photo.uri;
                       return (
                         <View key={photo.uri} style={styles.thumbWrapper}>
                           <Image
                             source={{ uri: photo.uri }}
-                      recyclingKey={photo.uri}
-                      cachePolicy="memory-disk"
+                            recyclingKey={photo.uri}
+                            cachePolicy="memory-disk"
                             style={[
                               styles.thumb,
+                              styles.thumbWithBorderSlot,
                               photoIsBlurry &&
                                 status !== 'trash' &&
                                 status !== 'later' &&
                                 styles.thumbBlurry,
                               status === 'trash' && styles.thumbSelected,
                               status === 'later' && styles.thumbLater,
+                              isPicked && styles.thumbPicked,
                             ]}
                             contentFit="cover"
                           />
-                          <Pressable
-                            style={styles.checkBadge}
-                            hitSlop={8}
-                            onPress={() => toggleMoveSelection(photo.uri)}
-                          >
-                            <View style={[styles.checkCircle, isChecked && styles.checkCircleOn]}>
-                              {isChecked && <Text style={styles.checkCircleText}>✓</Text>}
-                            </View>
-                          </Pressable>
-                          {status === 'trash' ? (
-                            <View style={styles.trashBadge}>
-                              <Text style={styles.trashBadgeText}>🗑</Text>
-                            </View>
-                          ) : status === 'later' ? (
-                            <View style={styles.laterBadge}>
-                              <Text style={styles.laterBadgeText}>🕐 plus tard</Text>
-                            </View>
-                          ) : (
-                            photoIsBlurry && (
-                              <View style={styles.blurBadge}>
-                                <Text style={styles.blurBadgeText}>🌫 flou</Text>
+                          {inReorder ? (
+                            <Pressable
+                              style={styles.reorderOverlay}
+                              onPress={() => handleReorderTap(group.id, photo.uri)}
+                            >
+                              <View style={styles.reorderNumber}>
+                                <Text style={styles.reorderNumberText}>{photoIndex + 1}</Text>
                               </View>
-                            )
+                            </Pressable>
+                          ) : (
+                            <>
+                              <Pressable
+                                style={styles.checkBadge}
+                                hitSlop={8}
+                                onPress={() => toggleMoveSelection(photo.uri)}
+                              >
+                                <View
+                                  style={[styles.checkCircle, isChecked && styles.checkCircleOn]}
+                                >
+                                  {isChecked && <Text style={styles.checkCircleText}>✓</Text>}
+                                </View>
+                              </Pressable>
+                              <Pressable
+                                style={styles.favHeart}
+                                hitSlop={6}
+                                onPress={() => onToggleFavorite(photo.uri)}
+                              >
+                                <Text
+                                  style={[styles.favHeartText, isFavorite && styles.favHeartTextOn]}
+                                >
+                                  {isFavorite ? '♥' : '♡'}
+                                </Text>
+                              </Pressable>
+                              {status === 'trash' ? (
+                                <View style={styles.trashBadge}>
+                                  <Text style={styles.trashBadgeText}>🗑</Text>
+                                </View>
+                              ) : status === 'later' ? (
+                                <View style={styles.trashBadge}>
+                                  <Text style={styles.trashBadgeText}>🕐</Text>
+                                </View>
+                              ) : (
+                                photoIsBlurry && (
+                                  <View style={styles.blurBadge}>
+                                    <Text style={styles.blurBadgeText}>🌫 flou</Text>
+                                  </View>
+                                )
+                              )}
+                              <Pressable
+                                style={styles.magnifyBadge}
+                                hitSlop={8}
+                                onPress={() => openGroupViewer(groupIndex, photoIndex)}
+                              >
+                                <Text style={styles.magnifyBadgeText}>🔍</Text>
+                              </Pressable>
+                            </>
                           )}
-                          <Pressable
-                            style={styles.magnifyBadge}
-                            hitSlop={8}
-                            onPress={() => openGroupViewer(groupIndex, photoIndex)}
-                          >
-                            <Text style={styles.magnifyBadgeText}>🔍</Text>
-                          </Pressable>
                           <View style={styles.statusRow}>
                             <Pressable
                               style={[
@@ -1269,9 +1408,11 @@ export default function ResultsScreen({
                                 status === 'keep' && styles.statusButtonActiveKeep,
                               ]}
                               hitSlop={4}
-                              onPress={() => onSetPhotoStatus(photo.uri, 'keep')}
+                              onPress={() =>
+                                onSetPhotoStatus(photo.uri, status === 'keep' ? 'undecided' : 'keep')
+                              }
                             >
-                              <Text style={styles.statusButtonText}>❤️</Text>
+                              <Text style={styles.statusButtonText}>✅</Text>
                             </Pressable>
                             <Pressable
                               style={[
@@ -1279,7 +1420,9 @@ export default function ResultsScreen({
                                 status === 'later' && styles.statusButtonActiveLater,
                               ]}
                               hitSlop={4}
-                              onPress={() => onSetPhotoStatus(photo.uri, 'later')}
+                              onPress={() =>
+                                onSetPhotoStatus(photo.uri, status === 'later' ? 'undecided' : 'later')
+                              }
                             >
                               <Text style={styles.statusButtonText}>🕐</Text>
                             </Pressable>
@@ -1289,7 +1432,9 @@ export default function ResultsScreen({
                                 status === 'trash' && styles.statusButtonActiveTrash,
                               ]}
                               hitSlop={4}
-                              onPress={() => onSetPhotoStatus(photo.uri, 'trash')}
+                              onPress={() =>
+                                onSetPhotoStatus(photo.uri, status === 'trash' ? 'undecided' : 'trash')
+                              }
                             >
                               <Text style={styles.statusButtonText}>🗑</Text>
                             </Pressable>
@@ -1297,6 +1442,17 @@ export default function ResultsScreen({
                         </View>
                       );
                     })}
+                    {inReorder && reorderPickedUri && (
+                      <Pressable
+                        style={styles.reorderEndTile}
+                        onPress={() => {
+                          onReorderMomentPhoto(group.id, reorderPickedUri, null);
+                          setReorderPickedUri(null);
+                        }}
+                      >
+                        <Text style={styles.reorderEndTileText}>à la fin</Text>
+                      </Pressable>
+                    )}
                   </ScrollView>
                 </View>
               );
@@ -1423,75 +1579,106 @@ export default function ResultsScreen({
           )}
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.list}>
-          <Text style={styles.instructions}>
-            {keepMode
-              ? "Touche les photos que tu veux garder : elles reçoivent un cœur. Tout ce qui n'a pas de cœur sera jeté à la validation."
-              : "Touche une photo pour la sélectionner à jeter, ou la loupe pour la voir en grand. L'étoile repère la version qui a l'air la meilleure, et « flou » repère celles qui ont l'air floues."}
-          </Text>
+        <FlatList
+          data={visibleGroups}
+          keyExtractor={(group) => group.id}
+          contentContainerStyle={styles.list}
+          // Thousands of photos can make hundreds of groups - only mount the
+          // ones near the visible area instead of every group's photos at once.
+          initialNumToRender={5}
+          maxToRenderPerBatch={4}
+          windowSize={5}
+          extraData={[selected, keepMode, kept, hideUnhearted, reviewedGroupKeys]}
+          ListHeaderComponent={
+            <>
+              <Text style={styles.instructions}>
+                {keepMode
+                  ? "Touche les photos que tu veux garder : elles reçoivent un cœur. Tout ce qui n'a pas de cœur sera jeté à la validation."
+                  : mode === 'duplicates'
+                    ? "Touche une photo pour la sélectionner à jeter, ou la loupe pour la voir en grand. L'étoile repère la meilleure version (souvent la plus lourde) et « < 1 Mo » repère les petites copies de faible qualité. Le curseur du haut règle la ressemblance : commence haut, puis baisse-le pour être moins strict."
+                    : "Touche une photo pour la sélectionner à jeter, ou la loupe pour la voir en grand. L'étoile repère la version qui a l'air la meilleure, et « flou » repère celles qui ont l'air floues."}
+              </Text>
 
-          <Pressable
-            style={styles.modeToggle}
-            onPress={() => (keepMode ? exitKeepMode() : enterKeepMode())}
-          >
-            <Text style={styles.modeToggleText}>
-              {keepMode ? '🗑 Revenir au choix des photos à jeter' : '❤️ Choisir plutôt celles à garder'}
-            </Text>
-          </Pressable>
-
-          {keepMode ? (
-            <View style={styles.bulkActionsRow}>
-              <Pressable style={styles.selectAllButton} onPress={heartAllStars}>
-                <Text style={styles.selectAllButtonText}>❤️ Cœur sur les étoilées</Text>
-              </Pressable>
               <Pressable
-                style={styles.selectAllButton}
-                onPress={() => setHideUnhearted((v) => !v)}
+                style={styles.modeToggle}
+                onPress={() => (keepMode ? exitKeepMode() : enterKeepMode())}
               >
-                <Text style={styles.selectAllButtonText}>
-                  {hideUnhearted ? '👁 Montrer celles sans cœur' : '🙈 Cacher celles sans cœur'}
+                <Text style={styles.modeToggleText}>
+                  {keepMode ? '🗑 Revenir au choix des photos à jeter' : '❤️ Choisir plutôt celles à garder'}
                 </Text>
               </Pressable>
-            </View>
-          ) : (
-            <View style={styles.bulkActionsRow}>
-              <Pressable
-                style={styles.selectAllButton}
-                onPress={() =>
-                  onSelectExceptBest(
-                    visibleGroups.flatMap((g) => g.photos.slice(1).map((p) => p.uri))
-                  )
-                }
-              >
-                <Text style={styles.selectAllButtonText}>⚡ Sauf la meilleure de chaque groupe</Text>
-              </Pressable>
-              <Pressable
-                style={styles.selectAllButton}
-                onPress={() =>
-                  onSelectExceptBest(
-                    visibleGroups.flatMap((g) => g.photos.filter(isBlurry).map((p) => p.uri))
-                  )
-                }
-              >
-                <Text style={styles.selectAllButtonText}>🌫 Toutes les photos floues</Text>
-              </Pressable>
-              {nextMode && (
-                <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
-                  <Text style={styles.selectAllButtonText}>
-                    ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          )}
 
-          {visibleGroups.map((group, groupIndex) => {
+              {keepMode ? (
+                <View style={styles.bulkActionsRow}>
+                  <Pressable style={styles.selectAllButton} onPress={heartAllStars}>
+                    <Text style={styles.selectAllButtonText}>❤️ Cœur sur les étoilées</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.selectAllButton}
+                    onPress={() => setHideUnhearted((v) => !v)}
+                  >
+                    <Text style={styles.selectAllButtonText}>
+                      {hideUnhearted ? '👁 Montrer celles sans cœur' : '🙈 Cacher celles sans cœur'}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.bulkActionsRow}>
+                  <Pressable
+                    style={styles.selectAllButton}
+                    onPress={() =>
+                      onSelectExceptBest(
+                        visibleGroups.flatMap((g) => g.photos.slice(1).map((p) => p.uri))
+                      )
+                    }
+                  >
+                    <Text style={styles.selectAllButtonText}>⚡ Sauf la meilleure de chaque groupe</Text>
+                  </Pressable>
+                  {mode === 'duplicates' ? (
+                    <Pressable
+                      style={styles.selectAllButton}
+                      onPress={() =>
+                        onSelectExceptBest(
+                          visibleGroups.flatMap((g) =>
+                            g.photos
+                              .slice(1)
+                              .filter((p) => isLowQualitySize(p))
+                              .map((p) => p.uri)
+                          )
+                        )
+                      }
+                    >
+                      <Text style={styles.selectAllButtonText}>
+                        📉 Les &lt; 1 Mo (sauf la meilleure)
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={styles.selectAllButton}
+                      onPress={() =>
+                        onSelectExceptBest(
+                          visibleGroups.flatMap((g) => g.photos.filter(isBlurry).map((p) => p.uri))
+                        )
+                      }
+                    >
+                      <Text style={styles.selectAllButtonText}>🌫 Toutes les photos floues</Text>
+                    </Pressable>
+                  )}
+                  {nextMode && (
+                    <Pressable style={styles.selectAllButton} onPress={() => onSwitchMode(nextMode)}>
+                      <Text style={styles.selectAllButtonText}>
+                        ✨ Passer à {SORT_STEPS[nextMode].shortTitle.toLowerCase()}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              )}
+            </>
+          }
+          renderItem={({ item: group, index: groupIndex }) => {
             const isReviewed = reviewedGroupKeys.has(groupKey(group));
             return (
-              <View
-                key={group.id}
-                style={[styles.groupCard, isReviewed && styles.groupCardReviewed]}
-              >
+              <View style={[styles.groupCard, isReviewed && styles.groupCardReviewed]}>
                 <View style={styles.groupHeaderRow}>
                   <View style={styles.groupLabelColumn}>
                     <Text style={styles.groupLabel}>
@@ -1532,6 +1719,7 @@ export default function ResultsScreen({
                     const isSelected = selected.has(photo.uri);
                     const photoIsBlurry = isBlurry(photo);
                     const isHearted = kept.has(photo.uri);
+                    const photoIsLow = mode === 'duplicates' && isLowQualitySize(photo);
                     return (
                       <Pressable
                         key={photo.uri}
@@ -1546,13 +1734,14 @@ export default function ResultsScreen({
                       >
                         <Image
                           source={{ uri: photo.uri }}
-                      recyclingKey={photo.uri}
-                      cachePolicy="memory-disk"
+                          recyclingKey={photo.uri}
+                          cachePolicy="memory-disk"
                           style={[
                             styles.thumb,
                             !keepMode && isSelected && styles.thumbSelected,
                             keepMode && !isHearted && styles.thumbUnhearted,
                             !keepMode && !isSelected && photoIsBlurry && styles.thumbBlurry,
+                            !keepMode && !isSelected && photoIsLow && styles.thumbLowQuality,
                           ]}
                           contentFit="cover"
                         />
@@ -1571,6 +1760,10 @@ export default function ResultsScreen({
                           <View style={styles.trashBadge}>
                             <Text style={styles.trashBadgeText}>🗑</Text>
                           </View>
+                        ) : photoIsLow ? (
+                          <View style={styles.lowQualityBadge}>
+                            <Text style={styles.lowQualityBadgeText}>📉 &lt; 1 Mo</Text>
+                          </View>
                         ) : (
                           photoIsBlurry && (
                             <View style={styles.blurBadge}>
@@ -1585,18 +1778,29 @@ export default function ResultsScreen({
                         >
                           <Text style={styles.magnifyBadgeText}>🔍</Text>
                         </Pressable>
-                        <Text style={styles.thumbSize}>
-                          {formatBytes(photo.sizeBytes)} · net. {Math.round(photo.sharpness)} (
-                          {photo.facesFound ? 'visage' : 'photo'})
-                        </Text>
+                        {mode === 'duplicates' ? (
+                          <>
+                            <Text style={[styles.thumbSize, photoIsLow && styles.thumbSizeLow]}>
+                              {formatBytes(photo.sizeBytes)}
+                            </Text>
+                            <Text style={styles.thumbFolder} numberOfLines={1}>
+                              📁 {shortFolderName(photo.folderPath)}
+                            </Text>
+                          </>
+                        ) : (
+                          <Text style={styles.thumbSize}>
+                            {formatBytes(photo.sizeBytes)} · net. {Math.round(photo.sharpness)} (
+                            {photo.facesFound ? 'visage' : 'photo'})
+                          </Text>
+                        )}
                       </Pressable>
                     );
                   })}
                 </ScrollView>
               </View>
             );
-          })}
-        </ScrollView>
+          }}
+        />
       )}
 
       {hasGroups && groups.length > 0 && visibleGroups.length > 0 && keepMode && (
@@ -1759,6 +1963,8 @@ export default function ResultsScreen({
             laterUris={laterUris}
             keptUris={keptUris}
             onSetPhotoStatus={mode === 'moments' ? onSetPhotoStatus : undefined}
+            favoriteUris={mode === 'moments' ? favoriteUris : undefined}
+            onToggleFavorite={mode === 'moments' ? onToggleFavorite : undefined}
           />
         )}
       </Modal>
@@ -1804,6 +2010,16 @@ export default function ResultsScreen({
             secondaryActionUris={secondaryMode ? secondaryActionUris : undefined}
             onToggleSecondaryAction={secondaryMode ? onToggleSecondaryAction : undefined}
             secondaryActionKind={secondaryMode ?? undefined}
+            favoriteUris={
+              !secondaryMode && (mode === 'momentsLater' || mode === 'momentsFinal')
+                ? favoriteUris
+                : undefined
+            }
+            onToggleFavorite={
+              !secondaryMode && (mode === 'momentsLater' || mode === 'momentsFinal')
+                ? onToggleFavorite
+                : undefined
+            }
           />
         )}
       </Modal>
@@ -1909,6 +2125,128 @@ export default function ResultsScreen({
               </View>
             </ScrollView>
             <Pressable style={styles.movePickerCancel} onPress={() => setMovePickerOpen(false)}>
+              <Text style={styles.movePickerCancelText}>Annuler</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={similarityScope !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSimilarityScope(null)}
+      >
+        <Pressable style={styles.movePickerBackdrop} onPress={() => setSimilarityScope(null)}>
+          <Pressable style={styles.secondaryMenuSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.movePickerTitle}>
+              {similarityScope === 'all'
+                ? 'Rapprocher les photos similaires (tous les moments)'
+                : 'Rapprocher les photos similaires de ce moment'}
+            </Text>
+            <Text style={styles.similarityDialogHint}>
+              Compare les photos entre elles à l'intérieur de chaque moment - c'est instantané,
+              rien n'est réanalysé.
+            </Text>
+            <View style={styles.similarityLabelRow}>
+              <Text style={styles.similarityLabel}>Niveau de ressemblance</Text>
+              <Text style={styles.similarityPercent}>{similarityPercent}%</Text>
+            </View>
+            <Slider
+              minimumValue={60}
+              maximumValue={95}
+              step={1}
+              value={similarityPercent}
+              onValueChange={setSimilarityPercent}
+              minimumTrackTintColor={colors.primary}
+              maximumTrackTintColor={colors.border}
+              thumbTintColor={colors.primary}
+            />
+            <View style={styles.similarityRow}>
+              <Text style={styles.similarityEdgeLabel}>Large</Text>
+              <Text style={styles.similarityEdgeLabel}>Très proches</Text>
+            </View>
+            <Pressable
+              style={[styles.deleteButton, styles.albumCreateButton, styles.similarityDialogButton]}
+              onPress={() => {
+                if (similarityScope) onRegroupBySimilarity(similarityScope, similarityPercent, 'sort');
+                setSimilarityScope(null);
+              }}
+            >
+              <Text style={styles.deleteButtonText}>↔ Les mettre côte à côte dans le même moment</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.deleteButton, styles.albumCreateButton, styles.similarityDialogButton]}
+              onPress={() => {
+                if (similarityScope) onRegroupBySimilarity(similarityScope, similarityPercent, 'split');
+                setSimilarityScope(null);
+              }}
+            >
+              <Text style={styles.deleteButtonText}>✂ Découper en plusieurs moments</Text>
+            </Pressable>
+            <Pressable style={styles.movePickerCancel} onPress={() => setSimilarityScope(null)}>
+              <Text style={styles.movePickerCancelText}>Annuler</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={placeGroupId !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setPlaceGroupId(null)}
+      >
+        <Pressable style={styles.movePickerBackdrop} onPress={() => setPlaceGroupId(null)}>
+          <Pressable style={styles.movePickerSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.movePickerTitle}>Placer ce moment après…</Text>
+            <ScrollView>
+              <View style={styles.movePickerGrid}>
+                <Pressable
+                  style={styles.movePickerTile}
+                  onPress={() => {
+                    if (placeGroupId) onMoveMomentGroupTo(placeGroupId, 'start');
+                    setPlaceGroupId(null);
+                  }}
+                >
+                  <View style={styles.movePickerNewTile}>
+                    <Text style={styles.movePickerNewTileText}>⤒</Text>
+                  </View>
+                  <Text style={styles.movePickerTileLabel} numberOfLines={2}>
+                    Tout au début
+                  </Text>
+                </Pressable>
+                {groups
+                  .filter((g) => g.id !== placeGroupId)
+                  .map((g) => {
+                    const first = g.photos[0];
+                    const number = groups.indexOf(g) + 1;
+                    return (
+                      <Pressable
+                        key={g.id}
+                        style={styles.movePickerTile}
+                        onPress={() => {
+                          if (placeGroupId) onMoveMomentGroupTo(placeGroupId, g.id);
+                          setPlaceGroupId(null);
+                        }}
+                      >
+                        <Image
+                          source={{ uri: first?.uri }}
+                          recyclingKey={first?.uri}
+                          cachePolicy="memory-disk"
+                          style={styles.movePickerThumb}
+                          contentFit="cover"
+                        />
+                        <Text style={styles.movePickerTileLabel} numberOfLines={2}>
+                          Après le moment {number} · {g.photos.length} photo
+                          {g.photos.length > 1 ? 's' : ''}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+              </View>
+            </ScrollView>
+            <Pressable style={styles.movePickerCancel} onPress={() => setPlaceGroupId(null)}>
               <Text style={styles.movePickerCancelText}>Annuler</Text>
             </Pressable>
           </Pressable>
@@ -2309,6 +2647,142 @@ const styles = StyleSheet.create({
   },
   thumbLater: {
     opacity: 0.6,
+  },
+  thumbPicked: {
+    borderColor: colors.primary,
+  },
+  groupActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  groupPill: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    marginRight: 6,
+    marginBottom: 6,
+  },
+  groupPillActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  groupPillDisabled: {
+    opacity: 0.35,
+  },
+  groupPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  groupPillTextActive: {
+    color: colors.primaryText,
+  },
+  reorderHint: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  reorderOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: 12,
+    backgroundColor: 'rgba(79,107,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 8,
+  },
+  reorderNumber: {
+    minWidth: 30,
+    height: 30,
+    borderRadius: 15,
+    paddingHorizontal: 6,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderNumberText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  reorderEndTile: {
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderEndTileText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  favHeart: {
+    position: 'absolute',
+    top: 4,
+    left: 38,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  favHeartText: {
+    fontSize: 20,
+    color: colors.subtleText,
+    marginTop: -2,
+  },
+  favHeartTextOn: {
+    color: colors.danger,
+  },
+  similarityDialogHint: {
+    fontSize: 13,
+    color: colors.subtleText,
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  similarityDialogButton: {
+    marginTop: 10,
+  },
+  thumbLowQuality: {
+    borderWidth: 3,
+    borderColor: colors.badge,
+  },
+  lowQualityBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    backgroundColor: colors.badge,
+  },
+  lowQualityBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  thumbSizeLow: {
+    color: '#B36B00',
+    fontWeight: '700',
+  },
+  thumbFolder: {
+    fontSize: 11,
+    color: colors.subtleText,
+    maxWidth: 150,
   },
   // A constant-width, initially-invisible border "slot" for the album grid,
   // so selecting/deselecting only ever changes a color, never the border

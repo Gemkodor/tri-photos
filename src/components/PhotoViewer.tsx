@@ -39,7 +39,10 @@ type Props = {
   laterUris?: Set<string>;
   /** Photos explicitly marked ❤️ - see photoStatus() below for why this is separate from "untouched". */
   keptUris?: Set<string>;
-  onSetPhotoStatus?: (uri: string, status: 'keep' | 'later' | 'trash') => void;
+  onSetPhotoStatus?: (uri: string, status: 'keep' | 'later' | 'trash' | 'undecided') => void;
+  /** ♥ favorite (also pre-ticks the photo for the album) - shown as a small heart in the top bar when given. */
+  favoriteUris?: Set<string>;
+  onToggleFavorite?: (uri: string) => void;
   /** "later" step has no use for re-marking "later" - only keep/trash apply there. */
   showLaterOption?: boolean;
   /** "album"/"quality" only: when given, a "add to album" toggle is shown
@@ -93,6 +96,8 @@ function PhotoViewerContent({
   keptUris,
   onSetPhotoStatus,
   showLaterOption = true,
+  favoriteUris,
+  onToggleFavorite,
   albumUris,
   onToggleAlbum,
   secondaryActionUris,
@@ -156,10 +161,47 @@ function PhotoViewerContent({
                 </Text>
               </Pressable>
             </View>
-            <View style={styles.closeButtonSpacer} />
+            {onToggleFavorite ? (
+              <Pressable
+                onPress={() => onToggleFavorite(photo.uri)}
+                hitSlop={12}
+                style={styles.favoriteButton}
+              >
+                <Text
+                  style={[
+                    styles.favoriteButtonText,
+                    favoriteUris?.has(photo.uri) && styles.favoriteButtonTextOn,
+                  ]}
+                >
+                  {favoriteUris?.has(photo.uri) ? '♥' : '♡'}
+                </Text>
+              </Pressable>
+            ) : (
+              <View style={styles.closeButtonSpacer} />
+            )}
           </>
         ) : (
-          <Text style={styles.groupLabelText}>{groupLabel}</Text>
+          <>
+            <Text style={styles.groupLabelText}>{groupLabel}</Text>
+            {onToggleFavorite ? (
+              <Pressable
+                onPress={() => onToggleFavorite(photo.uri)}
+                hitSlop={12}
+                style={styles.favoriteButton}
+              >
+                <Text
+                  style={[
+                    styles.favoriteButtonText,
+                    favoriteUris?.has(photo.uri) && styles.favoriteButtonTextOn,
+                  ]}
+                >
+                  {favoriteUris?.has(photo.uri) ? '♥' : '♡'}
+                </Text>
+              </Pressable>
+            ) : (
+              <View style={styles.closeButtonSpacer} />
+            )}
+          </>
         )}
       </View>
       <Text style={styles.counter}>
@@ -244,9 +286,9 @@ function PhotoViewerContent({
           <View style={styles.viewerStatusRow}>
             <Pressable
               style={[styles.viewerStatusButton, status === 'keep' && styles.viewerStatusButtonActiveKeep]}
-              onPress={() => onSetPhotoStatus(photo.uri, 'keep')}
+              onPress={() => onSetPhotoStatus(photo.uri, status === 'keep' ? 'undecided' : 'keep')}
             >
-              <Text style={styles.viewerStatusButtonText}>❤️ Garder</Text>
+              <Text style={styles.viewerStatusButtonText}>✅ Garder</Text>
             </Pressable>
             {showLaterOption && (
               <Pressable
@@ -254,7 +296,7 @@ function PhotoViewerContent({
                   styles.viewerStatusButton,
                   status === 'later' && styles.viewerStatusButtonActiveLater,
                 ]}
-                onPress={() => onSetPhotoStatus(photo.uri, 'later')}
+                onPress={() => onSetPhotoStatus(photo.uri, status === 'later' ? 'undecided' : 'later')}
               >
                 <Text style={styles.viewerStatusButtonText}>🕐 Plus tard</Text>
               </Pressable>
@@ -264,7 +306,14 @@ function PhotoViewerContent({
                 styles.viewerStatusButton,
                 status === 'trash' && styles.viewerStatusButtonActiveTrash,
               ]}
-              onPress={() => onSetPhotoStatus(photo.uri, 'trash')}
+              // In the "plus tard" step (no "later" button), un-trashing goes back to
+              // "later" rather than "undecided", which would drop it out of that list.
+              onPress={() =>
+                onSetPhotoStatus(
+                  photo.uri,
+                  status === 'trash' ? (showLaterOption ? 'undecided' : 'later') : 'trash'
+                )
+              }
             >
               <Text style={styles.viewerStatusButtonText}>🗑 Jeter</Text>
             </Pressable>
@@ -344,6 +393,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
+  },
+  favoriteButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  favoriteButtonText: {
+    color: '#fff',
+    fontSize: 22,
+    marginTop: -2,
+  },
+  favoriteButtonTextOn: {
+    color: '#FF5A6E',
   },
   closeButtonSpacer: {
     width: 36,

@@ -56,7 +56,9 @@ export const SORT_STEP_ORDER: SortMode[] = [
   'album',
   'quality',
 ];
-export const SORT_PART_ORDER: SortPart[] = ['duplicates', 'sorting', 'moments', 'quality'];
+// Only these two are offered on the home screen now - the older "sorting"
+// and "quality" parts are no longer reachable from there.
+export const SORT_PART_ORDER: SortPart[] = ['duplicates', 'moments'];
 
 export function partOf(mode: SortMode): SortPart {
   if (mode === 'duplicates') return 'duplicates';
@@ -123,7 +125,7 @@ export const SORT_PARTS: Record<
   duplicates: {
     title: 'Recherche de doublons',
     description:
-      'Repère les copies quasi parfaitement identiques de la même photo, pour un premier grand ménage rapide.',
+      "Repère les photos identiques ou qui se ressemblent, même dans plusieurs dossiers et même sur des milliers de photos (sans analyse de flou pour rester rapide). Tu règles la ressemblance avec un curseur, en commençant haut. Les photos de moins de 1 Mo sont bien repérées.",
     entryMode: 'duplicates',
   },
   sorting: {
@@ -135,7 +137,7 @@ export const SORT_PARTS: Record<
   moments: {
     title: 'Tri par moments',
     description:
-      "Regroupe toutes les photos par moment (quand elles ont été prises), sans regarder si elles se ressemblent - pour trier chronologiquement plutôt que par similarité.",
+      "Regroupe toutes les photos par moment (quand elles ont été prises). Tu peux réorganiser les moments et les photos, regrouper côte à côte les photos qui se ressemblent dans un moment, déplacer/copier vers d'autres dossiers, puis choisir tes favorites pour un album.",
     entryMode: 'moments',
   },
   quality: {
@@ -277,10 +279,18 @@ function packHash(hash: string): number[] {
   return words;
 }
 
-export function hammingDistance(a: number[], b: number[]): number {
+/**
+ * Bit distance between two packed hashes. With `limit`, stops counting as
+ * soon as the total exceeds it (returning that partial, over-limit total) -
+ * on a folder of thousands of photos almost every pair is far apart, so
+ * bailing after the first word or two instead of always summing all eight
+ * makes the pairwise grouping several times faster.
+ */
+export function hammingDistance(a: number[], b: number[], limit: number = Infinity): number {
   let total = 0;
   for (let i = 0; i < a.length; i++) {
     total += popcount32(a[i] ^ b[i]);
+    if (total > limit) return total;
   }
   return total;
 }
@@ -299,7 +309,7 @@ export function findClosestPair(photos: HashedPhoto[]): ClosestPair | null {
   let best: ClosestPair | null = null;
   for (let i = 0; i < photos.length; i++) {
     for (let j = i + 1; j < photos.length; j++) {
-      const distance = hammingDistance(packed[i], packed[j]);
+      const distance = hammingDistance(packed[i], packed[j], best ? best.distance : Infinity);
       if (!best || distance < best.distance) {
         best = { a: photos[i], b: photos[j], distance };
       }
@@ -409,7 +419,7 @@ export function groupDuplicates(
 
   for (let i = 0; i < photos.length; i++) {
     for (let j = i + 1; j < photos.length; j++) {
-      if (hammingDistance(packed[i], packed[j]) > threshold) continue;
+      if (hammingDistance(packed[i], packed[j], threshold) > threshold) continue;
       if (maxTimeGapMs !== undefined) {
         const ta = photos[i].capturedAt;
         const tb = photos[j].capturedAt;
@@ -487,6 +497,64 @@ export function groupByMoments(photos: HashedPhoto[], maxGapMs: number): Duplica
   flush();
 
   return groups;
+}
+
+/**
+ * Groups `photos` by hash similarity (transitively, within `threshold` bits),
+ * keeping singletons - in first-appearance order, each cluster's photos in
+ * their original order. Meant for a single moment's photos (a few dozen at
+ * most), where it's instant; it never needs the pixels again, only the
+ * hash every photo already carries.
+ */
+export function clusterBySimilarity(photos: HashedPhoto[], threshold: number): HashedPhoto[][] {
+  const packed = photos.map((p) => packHash(p.hash));
+  const uf = new UnionFind(photos.length);
+  for (let i = 0; i < photos.length; i++) {
+    for (let j = i + 1; j < photos.length; j++) {
+      if (hammingDistance(packed[i], packed[j], threshold) <= threshold) uf.union(i, j);
+    }
+  }
+  const clusters = new Map<number, HashedPhoto[]>();
+  photos.forEach((photo, i) => {
+    const root = uf.find(i);
+    const cluster = clusters.get(root);
+    if (cluster) cluster.push(photo);
+    else clusters.set(root, [photo]);
+  });
+  return Array.from(clusters.values());
+}
+
+/** Same photos, reordered so each set of similar ones sits side by side (sets ordered by where their first photo already was). */
+export function sortBySimilarity(photos: HashedPhoto[], threshold: number): HashedPhoto[] {
+  return ([] as HashedPhoto[]).concat(...clusterBySimilarity(photos, threshold));
+}
+
+/**
+ * Splits `photos` into one piece per set of 2+ similar photos, plus one
+ * piece gathering every photo that resembles nothing else (rather than a
+ * dozen one-photo pieces) - pieces ordered by where their first photo was.
+ */
+export function splitBySimilarity(photos: HashedPhoto[], threshold: number): HashedPhoto[][] {
+  const pieces: HashedPhoto[][] = [];
+  let singlesIndex = -1;
+  for (const cluster of clusterBySimilarity(photos, threshold)) {
+    if (cluster.length >= 2) {
+      pieces.push(cluster);
+    } else if (singlesIndex === -1) {
+      singlesIndex = pieces.length;
+      pieces.push([...cluster]);
+    } else {
+      pieces[singlesIndex].push(cluster[0]);
+    }
+  }
+  return pieces;
+}
+
+/** Files under this size (1 Mo) are usually a low-quality copy someone sent over - worth spotting at a glance. */
+export const LOW_QUALITY_MAX_BYTES = 1024 * 1024;
+
+export function isLowQualitySize(photo: HashedPhoto): boolean {
+  return photo.sizeBytes !== null && photo.sizeBytes < LOW_QUALITY_MAX_BYTES;
 }
 
 /** A photo is "clearly sharper" than another past this ratio of their sharpness scores. */
