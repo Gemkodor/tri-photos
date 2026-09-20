@@ -15,6 +15,8 @@ import FolderDestinationModal from '../components/FolderDestinationModal';
 import PhotoViewer from '../components/PhotoViewer';
 import {
   bestPhotoReason,
+  clusterBySimilarity,
+  colorMinForPercent,
   computeSharpnessBaseline,
   findClosestPair,
   groupHasLargeSizeDifference,
@@ -416,6 +418,23 @@ export default function ResultsScreen({
       }))
       .filter((entry) => entry.visiblePhotos.length > 0);
   }, [mode, visibleGroups, showKeptPhotos, keptUris]);
+
+  // Live preview for the "Ressemblance" dialog: which sets of similar photos
+  // the current slider position would put together - recomputed as the
+  // slider moves, so what it changes is visible before validating.
+  const similarityPreview = useMemo(() => {
+    if (similarityScope === null) return null;
+    const threshold = percentToThreshold(similarityPercent);
+    const colorMin = colorMinForPercent(similarityPercent);
+    const sets: HashedPhoto[][] = [];
+    for (const g of groups) {
+      if (similarityScope !== 'all' && g.id !== similarityScope) continue;
+      for (const cluster of clusterBySimilarity(g.photos, threshold, colorMin)) {
+        if (cluster.length >= 2) sets.push(cluster);
+      }
+    }
+    return { sets, photoCount: sets.reduce((n, c) => n + c.length, 0) };
+  }, [similarityScope, similarityPercent, groups]);
 
   function goToGroup(index: number) {
     if (index < 0 || index >= visibleGroups.length) return;
@@ -2165,8 +2184,51 @@ export default function ResultsScreen({
               <Text style={styles.similarityEdgeLabel}>Large</Text>
               <Text style={styles.similarityEdgeLabel}>Très proches</Text>
             </View>
+            <Text style={styles.similarityPreviewCount}>
+              {!similarityPreview || similarityPreview.sets.length === 0
+                ? 'Aucun ensemble de photos similaires à ce niveau - baisse le curseur.'
+                : `${similarityPreview.sets.length} ensemble${similarityPreview.sets.length > 1 ? 's' : ''} de photos similaires · ${similarityPreview.photoCount} photos concernées`}
+            </Text>
+            <ScrollView style={styles.similarityPreviewList}>
+              {similarityPreview?.sets.slice(0, 8).map((set, setIndex) => (
+                <ScrollView
+                  key={`${setIndex}-${set[0].uri}`}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.similarityPreviewRow}
+                >
+                  {set.slice(0, 10).map((photo) => (
+                    <Image
+                      key={photo.uri}
+                      source={{ uri: photo.uri }}
+                      recyclingKey={photo.uri}
+                      cachePolicy="memory-disk"
+                      style={styles.similarityPreviewThumb}
+                      contentFit="cover"
+                    />
+                  ))}
+                  {set.length > 10 && (
+                    <Text style={styles.similarityPreviewMore}>+{set.length - 10}</Text>
+                  )}
+                </ScrollView>
+              ))}
+              {similarityPreview && similarityPreview.sets.length > 8 && (
+                <Text style={styles.similarityPreviewMore}>
+                  … et {similarityPreview.sets.length - 8} autre
+                  {similarityPreview.sets.length - 8 > 1 ? 's' : ''} ensemble
+                  {similarityPreview.sets.length - 8 > 1 ? 's' : ''}
+                </Text>
+              )}
+            </ScrollView>
             <Pressable
-              style={[styles.deleteButton, styles.albumCreateButton, styles.similarityDialogButton]}
+              style={[
+                styles.deleteButton,
+                styles.albumCreateButton,
+                styles.similarityDialogButton,
+                (!similarityPreview || similarityPreview.sets.length === 0) &&
+                  styles.deleteButtonDisabled,
+              ]}
+              disabled={!similarityPreview || similarityPreview.sets.length === 0}
               onPress={() => {
                 if (similarityScope) onRegroupBySimilarity(similarityScope, similarityPercent, 'sort');
                 setSimilarityScope(null);
@@ -2175,7 +2237,14 @@ export default function ResultsScreen({
               <Text style={styles.deleteButtonText}>↔ Les mettre côte à côte dans le même moment</Text>
             </Pressable>
             <Pressable
-              style={[styles.deleteButton, styles.albumCreateButton, styles.similarityDialogButton]}
+              style={[
+                styles.deleteButton,
+                styles.albumCreateButton,
+                styles.similarityDialogButton,
+                (!similarityPreview || similarityPreview.sets.length === 0) &&
+                  styles.deleteButtonDisabled,
+              ]}
+              disabled={!similarityPreview || similarityPreview.sets.length === 0}
               onPress={() => {
                 if (similarityScope) onRegroupBySimilarity(similarityScope, similarityPercent, 'split');
                 setSimilarityScope(null);
@@ -2755,6 +2824,34 @@ const styles = StyleSheet.create({
   },
   similarityDialogButton: {
     marginTop: 10,
+  },
+  similarityPreviewCount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+    marginTop: 12,
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  similarityPreviewList: {
+    maxHeight: 200,
+  },
+  similarityPreviewRow: {
+    marginBottom: 8,
+    flexGrow: 0,
+  },
+  similarityPreviewThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    marginRight: 6,
+    backgroundColor: colors.border,
+  },
+  similarityPreviewMore: {
+    alignSelf: 'center',
+    fontSize: 12,
+    color: colors.subtleText,
+    marginRight: 6,
   },
   thumbLowQuality: {
     borderWidth: 3,
