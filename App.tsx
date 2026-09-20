@@ -17,7 +17,7 @@ import {
   updateScanningProgress,
 } from './src/lib/backgroundScan';
 import {
-  groupByMoments,
+  groupByMomentsSorted,
   groupDuplicates,
   clusterBySimilarity,
   colorMinForPercent,
@@ -181,7 +181,7 @@ export default function App() {
         // showing an empty "moments" step for no reason.
         setMomentGroups(
           saved.momentGroups ??
-            (isMomentsPart(restoredMode) ? groupByMoments(saved.hashedPhotos, MOMENT_GAP_MS) : [])
+            (isMomentsPart(restoredMode) ? groupByMomentsSorted(saved.hashedPhotos, MOMENT_GAP_MS) : [])
         );
         setScreen('results');
       }
@@ -275,7 +275,7 @@ export default function App() {
 
       const threshold = SORT_STEPS[forMode].defaultThreshold;
       const freshMomentGroups =
-        forMode === 'moments' ? groupByMoments(hashed, MOMENT_GAP_MS) : momentGroups;
+        forMode === 'moments' ? groupByMomentsSorted(hashed, MOMENT_GAP_MS) : momentGroups;
       setHashedPhotos(hashed);
       setHasSharpness(forMode !== 'duplicates');
       if (forMode === 'moments') {

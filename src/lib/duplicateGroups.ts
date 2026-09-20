@@ -598,6 +598,25 @@ export function splitBySimilarity(
   return pieces;
 }
 
+/** Where the "Ressemblance" slider of a moment starts, and the level moments are sorted at by default. */
+export const DEFAULT_MOMENT_SIMILARITY_PERCENT = 75;
+
+/**
+ * Moments as groupByMoments builds them, but with each moment's photos
+ * already ordered so similar ones sit side by side - what Flavie wants from
+ * the start instead of having to ask for it moment by moment. Uses the
+ * hashes/colours every photo already has, so it costs next to nothing.
+ */
+export function groupByMomentsSorted(photos: HashedPhoto[], maxGapMs: number): DuplicateGroup[] {
+  const threshold = percentToThreshold(DEFAULT_MOMENT_SIMILARITY_PERCENT);
+  const colorMin = colorMinForPercent(DEFAULT_MOMENT_SIMILARITY_PERCENT);
+  return groupByMoments(photos, maxGapMs).map((group) =>
+    group.photos.length > 1
+      ? { ...group, photos: sortBySimilarity(group.photos, threshold, colorMin) }
+      : group
+  );
+}
+
 /** Files under this size (1 Mo) are usually a low-quality copy someone sent over - worth spotting at a glance. */
 export const LOW_QUALITY_MAX_BYTES = 1024 * 1024;
 

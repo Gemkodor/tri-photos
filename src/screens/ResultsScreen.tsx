@@ -17,6 +17,7 @@ import {
   bestPhotoReason,
   clusterBySimilarity,
   colorMinForPercent,
+  DEFAULT_MOMENT_SIMILARITY_PERCENT,
   computeSharpnessBaseline,
   findClosestPair,
   groupHasLargeSizeDifference,
@@ -224,7 +225,7 @@ export default function ResultsScreen({
   const [reorderPickedUri, setReorderPickedUri] = useState<string | null>(null);
   const [placeGroupId, setPlaceGroupId] = useState<string | null>(null);
   const [similarityScope, setSimilarityScope] = useState<string | null>(null);
-  const [similarityPercent, setSimilarityPercent] = useState(75);
+  const [similarityPercent, setSimilarityPercent] = useState(DEFAULT_MOMENT_SIMILARITY_PERCENT);
 
   function handleReorderTap(groupId: string, uri: string) {
     if (!reorderPickedUri) {
