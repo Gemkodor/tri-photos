@@ -499,34 +499,78 @@ export function groupByMoments(photos: HashedPhoto[], maxGapMs: number): Duplica
   return groups;
 }
 
-/**
- * Groups `photos` by hash similarity (transitively, within `threshold` bits),
- * keeping singletons - in first-appearance order, each cluster's photos in
- * their original order. Meant for a single moment's photos (a few dozen at
- * most), where it's instant; it never needs the pixels again, only the
- * hash every photo already carries.
- */
-export function clusterBySimilarity(photos: HashedPhoto[], threshold: number): HashedPhoto[][] {
-  const packed = photos.map((p) => packHash(p.hash));
-  const uf = new UnionFind(photos.length);
-  for (let i = 0; i < photos.length; i++) {
-    for (let j = i + 1; j < photos.length; j++) {
-      if (hammingDistance(packed[i], packed[j], threshold) <= threshold) uf.union(i, j);
-    }
+/** Cosine similarity (0-1) of two photos' colour signatures, or null if either lacks one. */
+export function colorSimilarity(a: HashedPhoto, b: HashedPhoto): number | null {
+  if (!a.colorSig || !b.colorSig) return null;
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.colorSig.length; i++) {
+    const x = parseInt(a.colorSig[i], 16);
+    const y = parseInt(b.colorSig[i], 16);
+    dot += x * y;
+    na += x * x;
+    nb += y * y;
   }
-  const clusters = new Map<number, HashedPhoto[]>();
+  return na === 0 || nb === 0 ? null : dot / Math.sqrt(na * nb);
+}
+
+/**
+ * Turns the "ressemblance" slider (60-100 %) into the minimum colour
+ * similarity two photos need to be grouped by colour alone. Deliberately
+ * strict at the top and loose at the bottom - within one moment (same place,
+ * same light, minutes apart) two photos sharing a colour make-up are very
+ * likely the same subject, but not so loose that everything merges.
+ */
+export function colorMinForPercent(percent: number): number {
+  return 0.7 + 0.29 * (Math.min(100, Math.max(60, percent)) - 60) / 40;
+}
+
+/**
+ * Groups `photos` (a single moment's, a few dozen at most) by resemblance,
+ * keeping singletons - in first-appearance order, each cluster's photos in
+ * their original order. Two photos count as resembling each other when
+ * their shape hashes are within `threshold` bits (same framing, or a
+ * near-copy) OR - when both have a colour signature and `colorMin` is given
+ * - their colours match at least that well (same subject, different framing:
+ * hand, face, full body...). Each photo joins the first earlier cluster
+ * whose *first* photo it resembles, instead of chaining photo to photo,
+ * which with colours would slowly glue a whole moment into one blob. It
+ * never needs the pixels again, only what every photo already carries.
+ */
+export function clusterBySimilarity(
+  photos: HashedPhoto[],
+  threshold: number,
+  colorMin?: number
+): HashedPhoto[][] {
+  const packed = photos.map((p) => packHash(p.hash));
+  const clusters: { leader: number; photos: HashedPhoto[] }[] = [];
   photos.forEach((photo, i) => {
-    const root = uf.find(i);
-    const cluster = clusters.get(root);
-    if (cluster) cluster.push(photo);
-    else clusters.set(root, [photo]);
+    let best: { cluster: (typeof clusters)[number]; score: number } | null = null;
+    for (const cluster of clusters) {
+      const leader = cluster.leader;
+      const hashDistance = hammingDistance(packed[leader], packed[i], threshold);
+      const hashClose = hashDistance <= threshold;
+      const color = colorMin === undefined ? null : colorSimilarity(photos[leader], photo);
+      const colorClose = color !== null && color >= colorMin!;
+      if (!hashClose && !colorClose) continue;
+      // Prefer the closest match when more than one cluster qualifies.
+      const score = Math.max(hashClose ? 1 - hashDistance / HASH_BITS : 0, color ?? 0);
+      if (!best || score > best.score) best = { cluster, score };
+    }
+    if (best) best.cluster.photos.push(photo);
+    else clusters.push({ leader: i, photos: [photo] });
   });
-  return Array.from(clusters.values());
+  return clusters.map((c) => c.photos);
 }
 
 /** Same photos, reordered so each set of similar ones sits side by side (sets ordered by where their first photo already was). */
-export function sortBySimilarity(photos: HashedPhoto[], threshold: number): HashedPhoto[] {
-  return ([] as HashedPhoto[]).concat(...clusterBySimilarity(photos, threshold));
+export function sortBySimilarity(
+  photos: HashedPhoto[],
+  threshold: number,
+  colorMin?: number
+): HashedPhoto[] {
+  return ([] as HashedPhoto[]).concat(...clusterBySimilarity(photos, threshold, colorMin));
 }
 
 /**
@@ -534,10 +578,14 @@ export function sortBySimilarity(photos: HashedPhoto[], threshold: number): Hash
  * piece gathering every photo that resembles nothing else (rather than a
  * dozen one-photo pieces) - pieces ordered by where their first photo was.
  */
-export function splitBySimilarity(photos: HashedPhoto[], threshold: number): HashedPhoto[][] {
+export function splitBySimilarity(
+  photos: HashedPhoto[],
+  threshold: number,
+  colorMin?: number
+): HashedPhoto[][] {
   const pieces: HashedPhoto[][] = [];
   let singlesIndex = -1;
-  for (const cluster of clusterBySimilarity(photos, threshold)) {
+  for (const cluster of clusterBySimilarity(photos, threshold, colorMin)) {
     if (cluster.length >= 2) {
       pieces.push(cluster);
     } else if (singlesIndex === -1) {

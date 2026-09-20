@@ -32,6 +32,8 @@ export type HashedPhoto = {
   facesFound: boolean;
   /** Best-effort "when taken" guess (epoch ms) parsed from the file name, or null - see photoTimestamp.ts. */
   capturedAt: number | null;
+  /** Coarse colour histogram (see pixelAnalysis.ts) - lets similar-looking photos with different framing be grouped. Missing on analyses from before it existed. */
+  colorSig?: string;
 };
 
 const TEMP_DIR = (FileSystem.cacheDirectory ?? '') + 'tri-photos-tmp/';
@@ -106,7 +108,7 @@ export async function hashPhoto(
     // single bigger 220x220 render is decoded once and reused both for the
     // hash (downsampled in plain JS below) and for measuring blur - real
     // detail would get smoothed away by resizing straight to 17x16 first.
-    let metrics: { hash: string; sharpness: number; facesFound: boolean };
+    let metrics: { hash: string; sharpness: number; facesFound: boolean; colorSig?: string };
     try {
       if (!needSharpness) {
         const rendered = await ImageManipulator.manipulate(localUri)
@@ -133,7 +135,7 @@ export async function hashPhoto(
         const sharpness = faceRegion
           ? computeSharpnessInRegion(decoded, faceRegion.x, faceRegion.y, faceRegion.w, faceRegion.h)
           : computeSharpnessInRegion(decoded, 0, 0, decoded.width, decoded.height);
-        metrics = { hash, sharpness, facesFound: !!faceRegion };
+        metrics = { hash, sharpness, facesFound: !!faceRegion, colorSig: decoded.colorSig };
       }
     } catch (e) {
       return { photo: null, error: `analyse visuelle : ${describeError(e)}` };
@@ -150,6 +152,7 @@ export async function hashPhoto(
         hash: metrics.hash,
         sharpness: metrics.sharpness,
         facesFound: metrics.facesFound,
+        colorSig: metrics.colorSig,
         capturedAt: extractTimestampFromName(photo.name),
       },
       error: null,

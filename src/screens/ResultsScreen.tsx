@@ -222,7 +222,7 @@ export default function ResultsScreen({
   const [reorderPickedUri, setReorderPickedUri] = useState<string | null>(null);
   const [placeGroupId, setPlaceGroupId] = useState<string | null>(null);
   const [similarityScope, setSimilarityScope] = useState<string | null>(null);
-  const [similarityPercent, setSimilarityPercent] = useState(65);
+  const [similarityPercent, setSimilarityPercent] = useState(75);
 
   function handleReorderTap(groupId: string, uri: string) {
     if (!reorderPickedUri) {
@@ -2145,8 +2145,7 @@ export default function ResultsScreen({
                 : 'Rapprocher les photos similaires de ce moment'}
             </Text>
             <Text style={styles.similarityDialogHint}>
-              Compare les photos entre elles à l'intérieur de chaque moment - c'est instantané,
-              rien n'est réanalysé.
+              Compare la forme ET les couleurs des photos à l'intérieur de chaque moment (une main, un visage et un cadrage en pied du même bébé partagent les mêmes couleurs). C'est instantané.
             </Text>
             <View style={styles.similarityLabelRow}>
               <Text style={styles.similarityLabel}>Niveau de ressemblance</Text>

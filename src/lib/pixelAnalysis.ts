@@ -40,7 +40,11 @@ export type DecodedImage = {
   height: number;
   /** Grayscale, one value (0-255) per pixel, row-major - same weights as the old canvas code. */
   gray: Float64Array;
+  /** 64 hex chars: a coarse RGB colour histogram (see computeColorSignature). Only for 3+ channel images. */
+  colorSig?: string;
 };
+
+const HEX = '0123456789abcdef';
 
 /** Decodes a base64 PNG (as produced by expo-image-manipulator) straight to a grayscale pixel array. */
 export function decodePngToGrayscale(base64Png: string): DecodedImage {
@@ -49,16 +53,40 @@ export function decodePngToGrayscale(base64Png: string): DecodedImage {
   const { width, height, data, channels } = png;
   const gray = new Float64Array(width * height);
   const depthScale = png.depth === 16 ? 255 / 65535 : 1;
+  const bins = channels >= 3 ? new Uint32Array(64) : null;
   for (let i = 0; i < width * height; i++) {
     const base = i * channels;
     if (channels >= 3) {
-      gray[i] =
-        (0.299 * data[base] + 0.587 * data[base + 1] + 0.114 * data[base + 2]) * depthScale;
+      const r = data[base] * depthScale;
+      const g = data[base + 1] * depthScale;
+      const b = data[base + 2] * depthScale;
+      gray[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+      // 4 levels per channel -> 64 colour bins
+      (bins as Uint32Array)[((r >> 6) << 4) | ((g >> 6) << 2) | (b >> 6)]++;
     } else {
       gray[i] = data[base] * depthScale;
     }
   }
-  return { width, height, gray };
+  return { width, height, gray, colorSig: bins ? colorSignature(bins, width * height) : undefined };
+}
+
+/**
+ * A photo's overall colour make-up as 64 hex characters (one 4-bit value per
+ * colour bin: the square root of that bin's share of the image). The
+ * shape-based hash can't tell that a close-up of a hand, a face and a full-
+ * length shot of the same baby belong together - but they share the same
+ * skin tones, clothes and room, and a colour histogram doesn't care how the
+ * picture is framed. Comparing two of these (see colorSimilarity in
+ * duplicateGroups.ts) is a cosine similarity of the square-rooted shares,
+ * i.e. the Bhattacharyya coefficient.
+ */
+function colorSignature(bins: Uint32Array, pixelCount: number): string {
+  let sig = '';
+  for (let i = 0; i < 64; i++) {
+    const v = Math.min(15, Math.round(Math.sqrt(bins[i] / pixelCount) * 15));
+    sig += HEX[v];
+  }
+  return sig;
 }
 
 /**

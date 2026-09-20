@@ -20,6 +20,7 @@ import {
   groupByMoments,
   groupDuplicates,
   clusterBySimilarity,
+  colorMinForPercent,
   groupKey,
   MOMENT_GAP_MS,
   percentToThreshold,
@@ -947,15 +948,19 @@ export default function App() {
    */
   function regroupMomentsBySimilarity(scope: string | 'all', percent: number, how: 'sort' | 'split') {
     const threshold = percentToThreshold(percent);
+    const colorMin = colorMinForPercent(percent);
     const affected = momentGroups.filter((g) => scope === 'all' || g.id === scope);
     const similarSets = affected.reduce(
-      (n, g) => n + clusterBySimilarity(g.photos, threshold).filter((c) => c.length >= 2).length,
+      (n, g) => n + clusterBySimilarity(g.photos, threshold, colorMin).filter((c) => c.length >= 2).length,
       0
     );
     if (similarSets === 0) {
+      const hasColors = affected.some((g) => g.photos.some((p) => p.colorSig));
       Alert.alert(
         'Rien à regrouper',
-        'Aucune photo ne se ressemble assez à ce niveau. Baisse le curseur pour être moins exigeante.'
+        hasColors
+          ? 'Aucune photo ne se ressemble assez à ce niveau. Baisse le curseur pour être moins exigeante.'
+          : "Cette analyse date d'avant l'amélioration de la ressemblance (couleurs) : relance l'analyse des moments sur ce dossier pour en profiter."
       );
       return;
     }
@@ -965,9 +970,9 @@ export default function App() {
       if (scope !== 'all' && g.id !== scope) {
         next.push(g);
       } else if (how === 'sort') {
-        next.push({ ...g, photos: sortBySimilarity(g.photos, threshold) });
+        next.push({ ...g, photos: sortBySimilarity(g.photos, threshold, colorMin) });
       } else {
-        splitBySimilarity(g.photos, threshold).forEach((photos, i) => {
+        splitBySimilarity(g.photos, threshold, colorMin).forEach((photos, i) => {
           next.push({
             id: i === 0 ? g.id : `moment-split-${Date.now()}-${counter++}`,
             photos,
