@@ -599,7 +599,7 @@ export function splitBySimilarity(
 }
 
 /** Where the "Ressemblance" slider of a moment starts, and the level moments are sorted at by default. */
-export const DEFAULT_MOMENT_SIMILARITY_PERCENT = 75;
+export const DEFAULT_MOMENT_SIMILARITY_PERCENT = 90;
 
 /**
  * Moments as groupByMoments builds them, but with each moment's photos

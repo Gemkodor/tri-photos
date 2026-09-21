@@ -2158,7 +2158,7 @@ export default function ResultsScreen({
         onRequestClose={() => setSimilarityScope(null)}
       >
         <Pressable style={styles.movePickerBackdrop} onPress={() => setSimilarityScope(null)}>
-          <Pressable style={styles.secondaryMenuSheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={styles.similaritySheet} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.movePickerTitle}>
               {similarityScope === 'all'
                 ? 'Rapprocher les photos similaires (tous les moments)'
@@ -2190,15 +2190,19 @@ export default function ResultsScreen({
                 ? 'Aucun ensemble de photos similaires à ce niveau - baisse le curseur.'
                 : `${similarityPreview.sets.length} ensemble${similarityPreview.sets.length > 1 ? 's' : ''} de photos similaires · ${similarityPreview.photoCount} photos concernées`}
             </Text>
-            <ScrollView style={styles.similarityPreviewList}>
-              {similarityPreview?.sets.slice(0, 8).map((set, setIndex) => (
-                <ScrollView
-                  key={`${setIndex}-${set[0].uri}`}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.similarityPreviewRow}
-                >
-                  {set.slice(0, 10).map((photo) => (
+            {/* Every set is shown and the list scrolls (it used to stop at 8,
+                with no way down) - thumbnails wrap instead of scrolling
+                sideways so vertical swipes never fight a nested scroller. */}
+            <FlatList
+              style={styles.similarityPreviewList}
+              data={similarityPreview?.sets ?? []}
+              keyExtractor={(set, i) => `${i}-${set[0].uri}`}
+              nestedScrollEnabled
+              initialNumToRender={6}
+              windowSize={5}
+              renderItem={({ item: set }) => (
+                <View style={styles.similarityPreviewRow}>
+                  {set.slice(0, 12).map((photo) => (
                     <Image
                       key={photo.uri}
                       source={{ uri: photo.uri }}
@@ -2208,19 +2212,12 @@ export default function ResultsScreen({
                       contentFit="cover"
                     />
                   ))}
-                  {set.length > 10 && (
-                    <Text style={styles.similarityPreviewMore}>+{set.length - 10}</Text>
+                  {set.length > 12 && (
+                    <Text style={styles.similarityPreviewMore}>+{set.length - 12}</Text>
                   )}
-                </ScrollView>
-              ))}
-              {similarityPreview && similarityPreview.sets.length > 8 && (
-                <Text style={styles.similarityPreviewMore}>
-                  … et {similarityPreview.sets.length - 8} autre
-                  {similarityPreview.sets.length - 8 > 1 ? 's' : ''} ensemble
-                  {similarityPreview.sets.length - 8 > 1 ? 's' : ''}
-                </Text>
+                </View>
               )}
-            </ScrollView>
+            />
             <Pressable
               style={[
                 styles.deleteButton,
@@ -2834,18 +2831,32 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     lineHeight: 18,
   },
+  similaritySheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '92%',
+  },
   similarityPreviewList: {
-    maxHeight: 200,
+    flexGrow: 0,
+    flexShrink: 1,
   },
   similarityPreviewRow: {
-    marginBottom: 8,
-    flexGrow: 0,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    marginBottom: 10,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   similarityPreviewThumb: {
     width: 56,
     height: 56,
     borderRadius: 8,
     marginRight: 6,
+    marginBottom: 6,
     backgroundColor: colors.border,
   },
   similarityPreviewMore: {
