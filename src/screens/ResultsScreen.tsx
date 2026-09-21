@@ -1,6 +1,6 @@
 import Slider from '@react-native-community/slider';
 import { Image } from 'expo-image';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -419,6 +419,38 @@ export default function ResultsScreen({
       }))
       .filter((entry) => entry.visiblePhotos.length > 0);
   }, [mode, visibleGroups, showKeptPhotos, keptUris]);
+
+  // Reordering moments (⤒ Début, 📍 Placer, ▲▼...) made the list flicker
+  // between neighbouring moments, until the app was restarted: the list
+  // remembers each row's measured position by its key, and after a reorder
+  // those remembered positions belong to the wrong rows, so which rows it
+  // thinks should be on screen keeps flipping. A new `key` (only when the
+  // relative order of the moments actually changed - not for marking one
+  // "vu", which just hides a row) makes it start from clean measurements;
+  // it then jumps back to where she was, or to the top when the first
+  // moment changed (e.g. she sent one to the start).
+  const momentsListRef = useRef<FlatList<(typeof momentsRenderData)[number]>>(null);
+  const momentsScrollOffset = useRef(0);
+  const momentsPendingScroll = useRef<{ target: number; until: number } | null>(null);
+  const momentsOrderRef = useRef<{ ids: string[]; listKey: number }>({ ids: [], listKey: 0 });
+  const momentsListKey = useMemo(() => {
+    const ids = momentsRenderData.map((entry) => entry.group.id);
+    const previous = momentsOrderRef.current;
+    const idSet = new Set(ids);
+    const previousSet = new Set(previous.ids);
+    const commonNow = ids.filter((id) => previousSet.has(id)).join('|');
+    const commonBefore = previous.ids.filter((id) => idSet.has(id)).join('|');
+    let listKey = previous.listKey;
+    if (previous.ids.length > 0 && commonNow !== commonBefore) {
+      listKey += 1;
+      momentsPendingScroll.current = {
+        target: ids[0] !== previous.ids[0] ? 0 : momentsScrollOffset.current,
+        until: Date.now() + 1500,
+      };
+    }
+    momentsOrderRef.current = { ids, listKey };
+    return listKey;
+  }, [momentsRenderData]);
 
   // Live preview for the "Ressemblance" dialog: which sets of similar photos
   // the current slider position would put together - recomputed as the
@@ -1207,8 +1239,28 @@ export default function ResultsScreen({
           </View>
         ) : (
           <FlatList
+            key={momentsListKey}
+            ref={momentsListRef}
             data={momentsRenderData}
             keyExtractor={(entry) => entry.group.id}
+            removeClippedSubviews={false}
+            scrollEventThrottle={64}
+            onScroll={(event) => {
+              momentsScrollOffset.current = event.nativeEvent.contentOffset.y;
+              const pending = momentsPendingScroll.current;
+              if (pending && Math.abs(momentsScrollOffset.current - pending.target) < 2) {
+                momentsPendingScroll.current = null;
+              }
+            }}
+            onContentSizeChange={() => {
+              const pending = momentsPendingScroll.current;
+              if (!pending) return;
+              if (Date.now() > pending.until) {
+                momentsPendingScroll.current = null;
+                return;
+              }
+              momentsListRef.current?.scrollToOffset({ offset: pending.target, animated: false });
+            }}
             contentContainerStyle={styles.list}
             // Big folders (Flavie: 800+ photos, 100+ moments) made scrolling
             // unusable with every group mounted at once - only render what's
