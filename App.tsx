@@ -901,10 +901,18 @@ export default function App() {
       const newGroup = { id: `moment-manual-${Date.now()}`, photos: movedPhotos };
       const insertAt = insertAfterIndex + 1;
       next = [...withoutPhotos.slice(0, insertAt), newGroup, ...withoutPhotos.slice(insertAt)];
-    } else {
+    } else if (withoutPhotos.some((g) => g.id === targetGroupId)) {
       next = withoutPhotos.map((g) =>
         g.id === targetGroupId ? { ...g, photos: [...g.photos, ...movedPhotos] } : g
       );
+    } else {
+      // The chosen target was itself the source moment, and got fully
+      // emptied out above (e.g. moving a photo that's alone in its own
+      // moment "back" onto that same moment) - it no longer exists in
+      // withoutPhotos, so put it back rather than silently losing the photos.
+      const restoredGroup = { id: targetGroupId, photos: movedPhotos };
+      const insertAt = insertAfterIndex + 1;
+      next = [...withoutPhotos.slice(0, insertAt), restoredGroup, ...withoutPhotos.slice(insertAt)];
     }
     setMomentGroups(next);
     // Hand-edits like this one can't be recomputed from scratch on reopen

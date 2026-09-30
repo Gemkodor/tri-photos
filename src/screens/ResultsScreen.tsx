@@ -2160,7 +2160,10 @@ export default function ResultsScreen({
                     Copier vers un dossier
                   </Text>
                 </Pressable>
-                {groups.map((g, i) => {
+                {groups
+                  .map((g, i) => ({ g, i }))
+                  .filter(({ g }) => !g.photos.some((p) => moveSelection.has(p.uri)))
+                  .map(({ g, i }) => {
                   const first = g.photos[0];
                   const label = first?.capturedAt
                     ? new Date(first.capturedAt).toLocaleString('fr-FR', {
