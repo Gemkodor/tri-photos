@@ -2894,8 +2894,13 @@ const styles = StyleSheet.create({
     maxHeight: '92%',
   },
   similarityPreviewList: {
-    flexGrow: 0,
-    flexShrink: 1,
+    // flex: 1 alone isn't enough here - a flex child's default minHeight is
+    // "auto" (its own content size), not 0, so it refuses to shrink below
+    // however tall its content is and the maxHeight above never actually
+    // kicks in. minHeight: 0 lets it take exactly the leftover space
+    // (header/buttons take the rest) and become genuinely scrollable.
+    flex: 1,
+    minHeight: 0,
   },
   similarityPreviewRow: {
     flexDirection: 'row',
