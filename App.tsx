@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { Alert, AppState, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import HashWorker, { HashWorkerHandle } from './src/components/HashWorker';
 import { copyPhotosToFolder, copyPhotosToNewFolder } from './src/lib/albumExport';
@@ -10,6 +10,7 @@ import {
   getSavedFavorites,
   saveAnalysis,
   saveFavorites,
+  type SavedAnalysis,
 } from './src/lib/analysisStorage';
 import {
   startScanningService,
@@ -154,6 +155,51 @@ export default function App() {
 
   const trashReminder = useMemo(() => getTrashReminder(trashEntries), [trashEntries]);
 
+  // Every saveAnalysis call above fired-and-forgot, independently - two
+  // edits made in quick succession (e.g. two moment reorders) could finish
+  // writing out of order, with the *older* one landing last and silently
+  // reverting the newer one (a plausible explanation for moments Flavie had
+  // just rearranged "changing back" on their own). Chaining every write
+  // after the previous one's write has actually finished guarantees they
+  // land in the same order they were made in.
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+  function queueSaveAnalysis(analysis: SavedAnalysis): Promise<void> {
+    const run = saveChainRef.current.catch(() => {}).then(() => saveAnalysis(analysis));
+    saveChainRef.current = run;
+    return run;
+  }
+
+  // Second half of the same problem: if Android kills the app shortly after
+  // an edit (switching app, locking the screen), a save that was still in
+  // flight - or hadn't even started yet - never reaches storage, and the
+  // most recent changes are gone next time the app opens. Keeping the
+  // latest snapshot in a ref (always current, unlike a value captured in a
+  // callback) and flushing it the moment the app leaves the foreground
+  // catches it before that can happen.
+  const currentAnalysisRef = useRef<SavedAnalysis | null>(null);
+  useEffect(() => {
+    currentAnalysisRef.current = lastFolderUri
+      ? {
+          folderUri: lastFolderUri,
+          similarityThreshold,
+          hashedPhotos,
+          reviewedGroupKeys: Array.from(reviewedGroupKeys),
+          mode,
+          momentGroups,
+        }
+      : null;
+  }, [lastFolderUri, similarityThreshold, hashedPhotos, reviewedGroupKeys, mode, momentGroups]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active' && currentAnalysisRef.current) {
+        queueSaveAnalysis(currentAnalysisRef.current);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+
   useEffect(() => {
     getLastFolderUri().then(setLastFolderUriState);
     getSavedFavorites().then((uris) => {
@@ -291,7 +337,7 @@ export default function App() {
       setSecondaryActionUris(new Set());
       setReviewedGroupKeys(new Set());
       setScreen('results');
-      await saveAnalysis({
+      await queueSaveAnalysis({
         folderUri,
         similarityThreshold: threshold,
         hashedPhotos: hashed,
@@ -416,7 +462,7 @@ export default function App() {
     setSimilarityThreshold(threshold);
     setSelected(new Set());
     if (lastFolderUri) {
-      saveAnalysis({
+      queueSaveAnalysis({
         folderUri: lastFolderUri,
         similarityThreshold: threshold,
         hashedPhotos,
@@ -455,7 +501,7 @@ export default function App() {
     // that way after moving to another step, not silently forgotten.
     setReviewedGroupKeys(new Set());
     if (lastFolderUri) {
-      saveAnalysis({
+      queueSaveAnalysis({
         folderUri: lastFolderUri,
         similarityThreshold: threshold,
         hashedPhotos,
@@ -471,7 +517,7 @@ export default function App() {
       const next = new Set(prev);
       next.add(key);
       if (lastFolderUri) {
-        saveAnalysis({
+        queueSaveAnalysis({
           folderUri: lastFolderUri,
           similarityThreshold,
           hashedPhotos,
@@ -669,7 +715,7 @@ export default function App() {
                 return next;
               });
               if (lastFolderUri) {
-                await saveAnalysis({
+                await queueSaveAnalysis({
                   folderUri: lastFolderUri,
                   similarityThreshold,
                   hashedPhotos: remaining,
@@ -865,7 +911,7 @@ export default function App() {
     // (unlike every other step's grouping) - has to be saved as-is or
     // they're gone the moment the app closes.
     if (lastFolderUri) {
-      saveAnalysis({
+      queueSaveAnalysis({
         folderUri: lastFolderUri,
         similarityThreshold,
         hashedPhotos,
@@ -885,7 +931,7 @@ export default function App() {
     [next[index], next[swapWith]] = [next[swapWith], next[index]];
     setMomentGroups(next);
     if (lastFolderUri) {
-      saveAnalysis({
+      queueSaveAnalysis({
         folderUri: lastFolderUri,
         similarityThreshold,
         hashedPhotos,
@@ -899,7 +945,7 @@ export default function App() {
   function commitMomentGroups(next: DuplicateGroup[]) {
     setMomentGroups(next);
     if (lastFolderUri) {
-      saveAnalysis({
+      queueSaveAnalysis({
         folderUri: lastFolderUri,
         similarityThreshold,
         hashedPhotos,
@@ -1085,7 +1131,7 @@ export default function App() {
               });
               await refreshTrash();
               if (lastFolderUri) {
-                await saveAnalysis({
+                await queueSaveAnalysis({
                   folderUri: lastFolderUri,
                   similarityThreshold,
                   hashedPhotos: remaining,
